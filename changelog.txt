@@ -7,3 +7,4 @@ Date: 29. 08. 2026
     - Added asynchronous pathfinding, path visualization, and stuck recovery.
     - Added per-player queue limit and path visibility settings.
     - Added English and Simplified Chinese localisation.
+    - Added an isolated local Factorio load and simulation test harness.

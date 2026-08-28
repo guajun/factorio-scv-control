@@ -18,13 +18,23 @@ SCV Control 是一个面向 Factorio 2.0 的实验性 Mod，用 RTS 风格的鼠
 
 ## 已知限制
 
-- 目标版本为 Factorio 2.0 稳定版，尚未在 Factorio 2.0 游戏进程内实测。
+- 已在 Factorio 2.0.77 本地验证 Mod 加载和生命周期；交互移动仍需要更完整的实际游玩测试。
 - 当前版本接管方向键，因此暂不支持驾驶载具。
 - 目前只支持空地移动，采矿、维修、攻击和进入载具等情境指令尚未实现。
 
 ## 安装
 
 开发时，把本目录放入或链接到 Factorio 的 `mods` 目录。发布时，将目录打包为 `factorio-scv-control_0.1.0.zip`。
+
+## 本地测试
+
+在 PowerShell 7 中运行：
+
+```powershell
+pwsh -File .\tools\test.ps1
+```
+
+脚本会查找与 `info.json` 匹配的 Factorio 安装，把 Mod 复制到隔离的临时目录，创建地图并运行 120 tick，然后清理测试产物。可用 `-FactorioExe <路径>` 指定游戏程序，或用 `-KeepArtifacts` 保留测试文件。
 
 ## 路线图
 
@@ -33,7 +43,7 @@ SCV Control 是一个面向 Factorio 2.0 的实验性 Mod，用 RTS 风格的鼠
 - 增加采矿、维修、攻击和进入载具等情境指令。
 - 增加 RTS/直接控制模式切换。
 - 增加原创 SCV 风格角色原型和视觉资源。
-- 增加自动打包和发布检查。
+- 增加自动打包和更完整的本地集成测试。
 
 ## 许可
 

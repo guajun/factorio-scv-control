@@ -18,13 +18,23 @@ This is an early prototype. Save before testing it in an important factory.
 
 ## Known limitations
 
-- The mod targets Factorio 2.0 stable and has not yet been tested inside a Factorio 2.0 game process.
+- The mod load and lifecycle are tested locally on Factorio 2.0.77; interactive movement still needs broader gameplay testing.
 - Vehicle driving is not supported in this prototype because movement controls remain consumed while the mod is enabled.
 - Commands currently target empty ground only; context actions are planned for later versions.
 
 ## Installation
 
 For development, place or link this directory into the Factorio `mods` directory. For a release, package the directory as `factorio-scv-control_0.1.0.zip`.
+
+## Local testing
+
+Run the local test harness from PowerShell 7:
+
+```powershell
+pwsh -File .\tools\test.ps1
+```
+
+The script locates a Factorio installation matching `info.json`, copies the mod into an isolated temporary directory, creates a map, runs 120 simulation ticks, and removes the artifacts. Use `-FactorioExe <path>` to select an installation or `-KeepArtifacts` to retain the test files.
 
 ## Roadmap
 
@@ -33,7 +43,7 @@ For development, place or link this directory into the Factorio `mods` directory
 - Add context commands for mining, repairing, attacking, and entering vehicles.
 - Add an optional RTS/direct-control mode switch.
 - Add an SCV-style character prototype and original visual assets.
-- Add automated packaging and release checks.
+- Add automated packaging and broader local integration checks.
 
 ## License
 
