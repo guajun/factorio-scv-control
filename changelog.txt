@@ -1,0 +1,9 @@
+---------------------------------------------------------------------------------------------------
+Version: 0.1.0
+Date: 29. 08. 2026
+  Features:
+    - Added right-click movement commands for the player character.
+    - Added Shift + right-click command queueing.
+    - Added asynchronous pathfinding, path visualization, and stuck recovery.
+    - Added per-player queue limit and path visibility settings.
+    - Added English and Simplified Chinese localisation.

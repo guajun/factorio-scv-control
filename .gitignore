@@ -1,0 +1,5 @@
+*.zip
+.idea/
+.vscode/
+script-output/
+thumbs.db

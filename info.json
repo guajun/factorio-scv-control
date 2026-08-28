@@ -1,0 +1,11 @@
+{
+  "name": "factorio-scv-control",
+  "version": "0.1.0",
+  "title": "SCV Control",
+  "author": "guajun",
+  "factorio_version": "2.0",
+  "dependencies": [
+    "base >= 2.0.0"
+  ],
+  "description": "Replaces direct character movement with RTS-style right-click movement and a queued command system."
+}
