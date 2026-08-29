@@ -13,3 +13,4 @@ Date: 29. 08. 2026
   Bugfixes:
     - Fixed fast characters overshooting waypoints and repeatedly replanning around phantom obstacles.
     - Fixed old path renderings overlapping the current plan and appearing as a single detour.
+    - Added alternate-via optimization for extreme non-minimal paths returned by the engine pathfinder.

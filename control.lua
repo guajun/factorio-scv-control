@@ -5,6 +5,8 @@ local STUCK_CHECK_INTERVAL = 30
 local STUCK_DISTANCE = 0.05
 local MAX_STUCK_RETRIES = 3
 local PLANNER_LOG_PATH = "scv-control/planner.jsonl"
+local OPTIMIZE_DETOUR_THRESHOLD = 2
+local ALTERNATE_LATERAL_FRACTION = 0.75
 
 local function ensure_storage()
   storage.players = storage.players or {}
@@ -28,6 +30,7 @@ local function player_state(player_index)
     waypoint_index = 1,
     segment_start = nil,
     pending_request = nil,
+    pending_optimization = nil,
     next_command_id = 1,
     stuck_retries = 0,
     last_position = nil,
@@ -60,6 +63,70 @@ local function polyline_distance(start_position, points)
     previous = point
   end
   return total
+end
+
+local function append_unique_point(points, point)
+  local last = points[#points]
+  if not last or squared_distance(last, point) > 0.000001 then
+    points[#points + 1] = copy_position(point)
+  end
+end
+
+local function path_from_event(event, exact_goal)
+  local path = {}
+  local logged_path = {}
+  for _, waypoint in ipairs(event.path or {}) do
+    append_unique_point(path, waypoint.position)
+    logged_path[#logged_path + 1] = {
+      x = waypoint.position.x,
+      y = waypoint.position.y,
+      needs_destroy_to_reach = waypoint.needs_destroy_to_reach
+    }
+  end
+  append_unique_point(path, exact_goal)
+  return path, logged_path
+end
+
+local function alternate_via(player, start_position, goal_position, baseline_path)
+  local direct_x = goal_position.x - start_position.x
+  local direct_y = goal_position.y - start_position.y
+  local direct_length = math.sqrt(direct_x * direct_x + direct_y * direct_y)
+  if direct_length < 1 then
+    return nil
+  end
+
+  local perpendicular_x = -direct_y / direct_length
+  local perpendicular_y = direct_x / direct_length
+  local largest_signed_excursion = 0
+  for _, point in ipairs(baseline_path) do
+    local relative_x = point.x - start_position.x
+    local relative_y = point.y - start_position.y
+    local signed_excursion = relative_x * perpendicular_x + relative_y * perpendicular_y
+    if math.abs(signed_excursion) > math.abs(largest_signed_excursion) then
+      largest_signed_excursion = signed_excursion
+    end
+  end
+  if math.abs(largest_signed_excursion) < 2 then
+    return nil
+  end
+
+  local midpoint = {
+    x = (start_position.x + goal_position.x) / 2,
+    y = (start_position.y + goal_position.y) / 2
+  }
+  -- Probe the opposite side of the obstacle suggested by the baseline's largest lateral detour.
+  local opposite_offset = -largest_signed_excursion * ALTERNATE_LATERAL_FRACTION
+  local candidate = {
+    x = midpoint.x + perpendicular_x * opposite_offset,
+    y = midpoint.y + perpendicular_y * opposite_offset
+  }
+  return player.surface.find_non_colliding_position(
+    player.character.name,
+    candidate,
+    2,
+    0.25,
+    false
+  )
 end
 
 local function planner_logging_enabled()
@@ -184,6 +251,7 @@ local function clear_active(state)
   state.waypoint_index = 1
   state.segment_start = nil
   state.pending_request = nil
+  state.pending_optimization = nil
   state.stuck_retries = 0
   state.last_position = nil
   state.retry_tick = nil
@@ -193,6 +261,17 @@ local function finish_active(player, state)
   stop_walking(player)
   clear_active(state)
   start_next_command(player, state)
+end
+
+local function activate_path(player, state, path)
+  state.pending_request = nil
+  state.pending_optimization = nil
+  state.path = path
+  state.waypoint_index = 1
+  state.segment_start = copy_position(player.position)
+  state.last_position = copy_position(player.position)
+  state.last_stuck_check = game.tick
+  draw_path(player, state, state.path)
 end
 
 local function request_active_path(player, state, reason)
@@ -228,6 +307,7 @@ local function request_active_path(player, state, reason)
   state.path = nil
   state.retry_tick = nil
   storage.path_requests[request_id] = {
+    kind = "baseline",
     player_index = player.index,
     command_id = state.active.id,
     start_position = start_position,
@@ -244,6 +324,111 @@ local function request_active_path(player, state, reason)
     running_speed = player.character_running_speed
   })
   return true
+end
+
+local function request_candidate_segment(player, state, optimization, segment, start_position, goal_position)
+  local character = player.character
+  local prototype = character.prototype
+  local request_id = player.surface.request_path({
+    bounding_box = prototype.collision_box,
+    collision_mask = prototype.collision_mask,
+    start = start_position,
+    goal = goal_position,
+    force = player.force,
+    radius = ARRIVAL_DISTANCE,
+    pathfind_flags = {
+      prefer_straight_paths = false,
+      cache = false
+    },
+    can_open_gates = true,
+    entity_to_ignore = character
+  })
+
+  storage.path_requests[request_id] = {
+    kind = "candidate",
+    player_index = player.index,
+    command_id = state.active.id,
+    segment = segment,
+    start_position = copy_position(start_position),
+    goal_position = copy_position(goal_position)
+  }
+  optimization.request_ids[request_id] = true
+end
+
+local function start_path_optimization(player, state, request, baseline_path, baseline_distance, direct_distance)
+  local via = alternate_via(player, request.start_position, request.goal_position, baseline_path)
+  if not via then
+    return false
+  end
+
+  local optimization = {
+    command_id = request.command_id,
+    start_position = copy_position(request.start_position),
+    goal_position = copy_position(request.goal_position),
+    via = copy_position(via),
+    baseline_path = baseline_path,
+    baseline_distance = baseline_distance,
+    direct_distance = direct_distance,
+    segments = {},
+    request_ids = {}
+  }
+  state.pending_request = nil
+  state.pending_optimization = optimization
+
+  request_candidate_segment(player, state, optimization, 1, request.start_position, via)
+  request_candidate_segment(player, state, optimization, 2, via, request.goal_position)
+  planner_log(player, "path-optimization-request", {
+    command_id = request.command_id,
+    baseline_distance = baseline_distance,
+    direct_distance = direct_distance,
+    baseline_detour_ratio = baseline_distance / direct_distance,
+    via = copy_position(via)
+  })
+  return true
+end
+
+local function combine_paths(first, second)
+  local combined = {}
+  for _, point in ipairs(first) do
+    append_unique_point(combined, point)
+  end
+  for _, point in ipairs(second) do
+    append_unique_point(combined, point)
+  end
+  return combined
+end
+
+local function finish_path_optimization(player, state)
+  local optimization = state.pending_optimization
+  if not optimization
+      or optimization.segments[1] == nil
+      or optimization.segments[2] == nil then
+    return
+  end
+
+  local candidate_path = nil
+  local candidate_distance = nil
+  if optimization.segments[1] and optimization.segments[2] then
+    candidate_path = combine_paths(optimization.segments[1], optimization.segments[2])
+    candidate_distance = polyline_distance(optimization.start_position, candidate_path)
+  end
+
+  local use_candidate = candidate_distance
+    and candidate_distance + 0.01 < optimization.baseline_distance
+  local selected_path = use_candidate and candidate_path or optimization.baseline_path
+  planner_log(player, "path-optimization-result", {
+    command_id = optimization.command_id,
+    status = candidate_path and "success" or "candidate-failed",
+    via = optimization.via,
+    baseline_distance = optimization.baseline_distance,
+    candidate_distance = candidate_distance,
+    selected = use_candidate and "candidate" or "baseline",
+    improvement_ratio = candidate_distance
+      and (optimization.baseline_distance - candidate_distance) / optimization.baseline_distance
+      or 0,
+    candidate_path = candidate_path
+  })
+  activate_path(player, state, selected_path)
 end
 
 start_next_command = function(player, state)
@@ -362,9 +547,7 @@ script.on_event(defines.events.on_script_path_request_finished, function(event)
 
   local player = game.get_player(request.player_index)
   local state = storage.players[request.player_index]
-  if not player or not state or not state.active
-      or state.active.id ~= request.command_id
-      or state.pending_request ~= event.id then
+  if not player or not state or not state.active or state.active.id ~= request.command_id then
     if player then
       planner_log(player, "path-result", {
         request_id = event.id,
@@ -372,6 +555,54 @@ script.on_event(defines.events.on_script_path_request_finished, function(event)
         status = "stale"
       })
     end
+    return
+  end
+
+  if request.kind == "candidate" then
+    local optimization = state.pending_optimization
+    if not optimization or optimization.command_id ~= request.command_id then
+      planner_log(player, "path-candidate-result", {
+        request_id = event.id,
+        command_id = request.command_id,
+        segment = request.segment,
+        status = "stale"
+      })
+      return
+    end
+
+    optimization.request_ids[event.id] = nil
+    if event.try_again_later or not event.path then
+      optimization.segments[request.segment] = false
+      planner_log(player, "path-candidate-result", {
+        request_id = event.id,
+        command_id = request.command_id,
+        segment = request.segment,
+        status = event.try_again_later and "busy" or "no-path"
+      })
+    else
+      local segment_path = path_from_event(event, request.goal_position)
+      optimization.segments[request.segment] = segment_path
+      planner_log(player, "path-candidate-result", {
+        request_id = event.id,
+        command_id = request.command_id,
+        segment = request.segment,
+        status = "success",
+        start = request.start_position,
+        goal = request.goal_position,
+        path_distance = polyline_distance(request.start_position, segment_path),
+        path = segment_path
+      })
+    end
+    finish_path_optimization(player, state)
+    return
+  end
+
+  if state.pending_request ~= event.id then
+    planner_log(player, "path-result", {
+      request_id = event.id,
+      command_id = request.command_id,
+      status = "stale"
+    })
     return
   end
 
@@ -397,32 +628,14 @@ script.on_event(defines.events.on_script_path_request_finished, function(event)
     return
   end
 
-  state.path = {}
-  local logged_path = {}
-  for _, waypoint in ipairs(event.path) do
-    local point = {
-      x = waypoint.position.x,
-      y = waypoint.position.y
-    }
-    table.insert(state.path, point)
-    table.insert(logged_path, {
-      x = point.x,
-      y = point.y,
-      needs_destroy_to_reach = waypoint.needs_destroy_to_reach
-    })
-  end
-  table.insert(state.path, {
-    x = state.active.position.x,
-    y = state.active.position.y
-  })
-  state.waypoint_index = 1
-  state.segment_start = {x = player.position.x, y = player.position.y}
-  state.last_position = {x = player.position.x, y = player.position.y}
-  state.last_stuck_check = game.tick
   local request_start = request.start_position or copy_position(player.position)
   local request_goal = request.goal_position or copy_position(state.active.position)
-  local path_distance = polyline_distance(request_start, state.path)
+  request.start_position = request_start
+  request.goal_position = request_goal
+  local baseline_path, logged_path = path_from_event(event, request_goal)
+  local path_distance = polyline_distance(request_start, baseline_path)
   local direct_distance = distance(request_start, request_goal)
+  local detour_ratio = direct_distance > 0 and path_distance / direct_distance or 1
   planner_log(player, "path-result", {
     request_id = event.id,
     command_id = request.command_id,
@@ -433,10 +646,23 @@ script.on_event(defines.events.on_script_path_request_finished, function(event)
     waypoint_count = #event.path,
     path_distance = path_distance,
     direct_distance = direct_distance,
-    detour_ratio = direct_distance > 0 and path_distance / direct_distance or 1,
+    detour_ratio = detour_ratio,
+    optimization_eligible = detour_ratio > OPTIMIZE_DETOUR_THRESHOLD,
     path = logged_path
   })
-  draw_path(player, state, state.path)
+
+  if detour_ratio > OPTIMIZE_DETOUR_THRESHOLD
+      and start_path_optimization(
+        player,
+        state,
+        request,
+        baseline_path,
+        path_distance,
+        direct_distance
+      ) then
+    return
+  end
+  activate_path(player, state, baseline_path)
 end)
 
 local function update_player(player, tick)
