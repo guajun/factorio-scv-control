@@ -4,6 +4,7 @@ local SPEED_DISTANCE_MULTIPLIER = 1.5
 local STUCK_CHECK_INTERVAL = 30
 local STUCK_DISTANCE = 0.05
 local MAX_STUCK_RETRIES = 3
+local PLANNER_LOG_PATH = "scv-control/planner.jsonl"
 
 local function ensure_storage()
   storage.players = storage.players or {}
@@ -15,6 +16,7 @@ local function player_state(player_index)
 
   local state = storage.players[player_index]
   if state then
+    state.path_renderings = state.path_renderings or {}
     return state
   end
 
@@ -22,6 +24,7 @@ local function player_state(player_index)
     queue = {},
     active = nil,
     path = nil,
+    path_renderings = {},
     waypoint_index = 1,
     segment_start = nil,
     pending_request = nil,
@@ -39,6 +42,49 @@ local function squared_distance(a, b)
   local dx = a.x - b.x
   local dy = a.y - b.y
   return dx * dx + dy * dy
+end
+
+local function copy_position(position)
+  return {x = position.x, y = position.y}
+end
+
+local function distance(a, b)
+  return math.sqrt(squared_distance(a, b))
+end
+
+local function polyline_distance(start_position, points)
+  local total = 0
+  local previous = start_position
+  for _, point in ipairs(points) do
+    total = total + distance(previous, point)
+    previous = point
+  end
+  return total
+end
+
+local function planner_logging_enabled()
+  local interface = remote.interfaces["scv_test_lab"]
+  return interface
+    and interface.planner_logging_enabled
+    and remote.call("scv_test_lab", "planner_logging_enabled")
+end
+
+local function planner_log(player, event_type, fields)
+  if not player or not planner_logging_enabled() then
+    return
+  end
+
+  local record = fields or {}
+  record.event = event_type
+  record.tick = game.tick
+  record.player_index = player.index
+  record.surface = player.surface.name
+  helpers.write_file(
+    PLANNER_LOG_PATH,
+    helpers.table_to_json(record) .. "\n",
+    true,
+    player.index
+  )
 end
 
 local function stop_walking(player)
@@ -97,23 +143,34 @@ local function draw_command_marker(player, position, queued)
   })
 end
 
-local function draw_path(player, path)
+local function clear_path_renderings(state)
+  state.path_renderings = state.path_renderings or {}
+  for _, object in pairs(state.path_renderings) do
+    if object.valid then
+      object.destroy()
+    end
+  end
+  state.path_renderings = {}
+end
+
+local function draw_path(player, state, path)
+  clear_path_renderings(state)
   if not show_path(player) then
     return
   end
 
   local previous = player.position
   for _, waypoint in ipairs(path) do
-    rendering.draw_line({
+    local object = rendering.draw_line({
       color = {r = 0.2, g = 0.85, b = 1, a = 0.65},
       width = 2,
       from = previous,
       to = waypoint,
       surface = player.surface,
       players = {player.index},
-      time_to_live = 180,
       draw_on_ground = true
     })
+    table.insert(state.path_renderings, object)
     previous = waypoint
   end
 end
@@ -121,6 +178,7 @@ end
 local start_next_command
 
 local function clear_active(state)
+  clear_path_renderings(state)
   state.active = nil
   state.path = nil
   state.waypoint_index = 1
@@ -137,7 +195,7 @@ local function finish_active(player, state)
   start_next_command(player, state)
 end
 
-local function request_active_path(player, state)
+local function request_active_path(player, state, reason)
   local character = player.character
   if not character or not character.valid or not state.active then
     return false
@@ -147,7 +205,10 @@ local function request_active_path(player, state)
     return false
   end
 
+  clear_path_renderings(state)
   local prototype = character.prototype
+  local start_position = copy_position(character.position)
+  local goal_position = copy_position(state.active.position)
   local request_id = player.surface.request_path({
     bounding_box = prototype.collision_box,
     collision_mask = prototype.collision_mask,
@@ -168,8 +229,20 @@ local function request_active_path(player, state)
   state.retry_tick = nil
   storage.path_requests[request_id] = {
     player_index = player.index,
-    command_id = state.active.id
+    command_id = state.active.id,
+    start_position = start_position,
+    goal_position = goal_position,
+    reason = reason or "unspecified"
   }
+  planner_log(player, "path-request", {
+    request_id = request_id,
+    command_id = state.active.id,
+    reason = reason or "unspecified",
+    start = start_position,
+    goal = goal_position,
+    direct_distance = distance(start_position, goal_position),
+    running_speed = player.character_running_speed
+  })
   return true
 end
 
@@ -183,7 +256,7 @@ start_next_command = function(player, state)
   state.last_position = {x = player.position.x, y = player.position.y}
   state.last_stuck_check = game.tick
 
-  if not request_active_path(player, state) then
+  if not request_active_path(player, state, "command-start") then
     player.print({"scv-control.command-unavailable"})
     clear_active(state)
     start_next_command(player, state)
@@ -197,20 +270,31 @@ local function cancel_all(player)
   stop_walking(player)
 end
 
-local function can_accept_ground_command(player, event)
-  return not event.in_gui
-    and player.controller_type == defines.controllers.character
-    and player.character
-    and player.character.valid
-    and not player.vehicle
-    and player.opened == nil
-    and player.is_cursor_empty()
-    and player.selected == nil
+local function command_rejection_reason(player, event)
+  if event.in_gui then return "cursor-in-gui" end
+  if player.controller_type ~= defines.controllers.character then return "not-character-controller" end
+  if not player.character or not player.character.valid then return "no-valid-character" end
+  if player.vehicle then return "driving" end
+  if player.opened ~= nil then return "gui-open" end
+  if not player.is_cursor_empty() then return "cursor-not-empty" end
+  if player.selected ~= nil then return "entity-selected" end
+  return nil
 end
 
 local function issue_move_command(event, queued)
   local player = game.get_player(event.player_index)
-  if not player or not can_accept_ground_command(player, event) then
+  if not player then
+    return
+  end
+
+  local rejection_reason = command_rejection_reason(player, event)
+  if rejection_reason then
+    planner_log(player, "click", {
+      accepted = false,
+      queued = queued,
+      target = copy_position(event.cursor_position),
+      reason = rejection_reason
+    })
     return
   end
 
@@ -220,6 +304,12 @@ local function issue_move_command(event, queued)
     state = player_state(player.index)
   elseif #state.queue + (state.active and 1 or 0) >= queue_limit(player) then
     player.print({"scv-control.queue-full", queue_limit(player)})
+    planner_log(player, "click", {
+      accepted = false,
+      queued = true,
+      target = copy_position(event.cursor_position),
+      reason = "queue-full"
+    })
     return
   end
 
@@ -230,6 +320,15 @@ local function issue_move_command(event, queued)
   }
   state.next_command_id = state.next_command_id + 1
   table.insert(state.queue, command)
+
+  planner_log(player, "click", {
+    accepted = true,
+    queued = queued,
+    command_id = command.id,
+    start = copy_position(player.position),
+    target = copy_position(command.position),
+    queue_depth = #state.queue + (state.active and 1 or 0)
+  })
 
   draw_command_marker(player, command.position, queued)
   start_next_command(player, state)
@@ -266,26 +365,50 @@ script.on_event(defines.events.on_script_path_request_finished, function(event)
   if not player or not state or not state.active
       or state.active.id ~= request.command_id
       or state.pending_request ~= event.id then
+    if player then
+      planner_log(player, "path-result", {
+        request_id = event.id,
+        command_id = request.command_id,
+        status = "stale"
+      })
+    end
     return
   end
 
   state.pending_request = nil
   if event.try_again_later then
+    planner_log(player, "path-result", {
+      request_id = event.id,
+      command_id = request.command_id,
+      status = "busy"
+    })
     state.retry_tick = game.tick + 30
     return
   end
 
   if not event.path then
+    planner_log(player, "path-result", {
+      request_id = event.id,
+      command_id = request.command_id,
+      status = "no-path"
+    })
     player.print({"scv-control.no-path"})
     finish_active(player, state)
     return
   end
 
   state.path = {}
+  local logged_path = {}
   for _, waypoint in ipairs(event.path) do
-    table.insert(state.path, {
+    local point = {
       x = waypoint.position.x,
       y = waypoint.position.y
+    }
+    table.insert(state.path, point)
+    table.insert(logged_path, {
+      x = point.x,
+      y = point.y,
+      needs_destroy_to_reach = waypoint.needs_destroy_to_reach
     })
   end
   table.insert(state.path, {
@@ -296,7 +419,24 @@ script.on_event(defines.events.on_script_path_request_finished, function(event)
   state.segment_start = {x = player.position.x, y = player.position.y}
   state.last_position = {x = player.position.x, y = player.position.y}
   state.last_stuck_check = game.tick
-  draw_path(player, state.path)
+  local request_start = request.start_position or copy_position(player.position)
+  local request_goal = request.goal_position or copy_position(state.active.position)
+  local path_distance = polyline_distance(request_start, state.path)
+  local direct_distance = distance(request_start, request_goal)
+  planner_log(player, "path-result", {
+    request_id = event.id,
+    command_id = request.command_id,
+    status = "success",
+    reason = request.reason,
+    start = request_start,
+    goal = request_goal,
+    waypoint_count = #event.path,
+    path_distance = path_distance,
+    direct_distance = direct_distance,
+    detour_ratio = direct_distance > 0 and path_distance / direct_distance or 1,
+    path = logged_path
+  })
+  draw_path(player, state, state.path)
 end)
 
 local function update_player(player, tick)
@@ -325,7 +465,7 @@ local function update_player(player, tick)
   end
 
   if state.retry_tick and tick >= state.retry_tick then
-    request_active_path(player, state)
+    request_active_path(player, state, "pathfinder-busy-retry")
     return
   end
 
@@ -355,7 +495,7 @@ local function update_player(player, tick)
     if squared_distance(character.position, state.active.position) <= arrival_distance * arrival_distance then
       finish_active(player, state)
     else
-      request_active_path(player, state)
+      request_active_path(player, state, "endpoint-correction")
     end
     return
   end
@@ -375,7 +515,7 @@ local function update_player(player, tick)
       player.print({"scv-control.stuck"})
       finish_active(player, state)
     else
-      request_active_path(player, state)
+      request_active_path(player, state, "stuck-replan")
     end
   else
     state.stuck_retries = 0

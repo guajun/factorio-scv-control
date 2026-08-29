@@ -246,6 +246,16 @@ end
 
 local test_lab = {}
 
+test_lab.add_remote_interface = function()
+  if not remote.interfaces["scv_test_lab"] then
+    remote.add_interface("scv_test_lab", {
+      planner_logging_enabled = function()
+        return true
+      end
+    })
+  end
+end
+
 test_lab.on_init = function()
   remote.call("freeplay", "set_disable_crashsite", true)
   remote.call("freeplay", "set_skip_intro", true)
@@ -291,6 +301,13 @@ test_lab.add_commands = function()
   commands.add_command("scv-test-home", {"scv-test.command-home-help"}, function(command)
     if command.player_index then
       prepare_player(game.get_player(command.player_index))
+    end
+  end)
+
+  commands.add_command("scv-test-clear-log", {"scv-test.command-clear-log-help"}, function(command)
+    if command.player_index then
+      helpers.write_file("scv-control/planner.jsonl", "", false, command.player_index)
+      game.get_player(command.player_index).print({"scv-test.log-cleared"})
     end
   end)
 end

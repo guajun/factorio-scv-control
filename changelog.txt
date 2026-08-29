@@ -9,5 +9,7 @@ Date: 29. 08. 2026
     - Added English and Simplified Chinese localisation.
     - Added an isolated local Factorio load and simulation test harness.
     - Added a reusable interactive test scenario and local save generator.
+    - Added automatic structured planner logging in the interactive test scenario.
   Bugfixes:
     - Fixed fast characters overshooting waypoints and repeatedly replanning around phantom obstacles.
+    - Fixed old path renderings overlapping the current plan and appearing as a single detour.
