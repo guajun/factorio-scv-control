@@ -17,3 +17,4 @@ Date: 29. 08. 2026
     - Fixed fast characters overshooting waypoints and repeatedly replanning around phantom obstacles.
     - Fixed old path renderings overlapping the current plan and appearing as a single detour.
     - Optimized extreme non-minimal paths returned by the engine pathfinder using an alternate via.
+    - Removed collision-safe grid zigzags and endpoint reversals from engine paths before following them.

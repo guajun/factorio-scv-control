@@ -47,7 +47,9 @@ function PathMath.path_from_event(event, exact_goal)
       needs_destroy_to_reach = waypoint.needs_destroy_to_reach
     }
   end
-  PathMath.append_unique_point(path, exact_goal)
+  if exact_goal then
+    PathMath.append_unique_point(path, exact_goal)
+  end
   return path, logged_path
 end
 
@@ -96,6 +98,43 @@ function PathMath.combine_paths(first, second)
     PathMath.append_unique_point(combined, point)
   end
   return combined
+end
+
+function PathMath.turn_metrics(points)
+  local metrics = {
+    corner_count = 0,
+    max_turn_degrees = 0,
+    reversal_count = 0,
+    turns = {}
+  }
+  for index = 2, #points - 1 do
+    local previous = points[index - 1]
+    local current = points[index]
+    local following = points[index + 1]
+    local incoming_x = current.x - previous.x
+    local incoming_y = current.y - previous.y
+    local outgoing_x = following.x - current.x
+    local outgoing_y = following.y - current.y
+    local incoming_length = math.sqrt(incoming_x * incoming_x + incoming_y * incoming_y)
+    local outgoing_length = math.sqrt(outgoing_x * outgoing_x + outgoing_y * outgoing_y)
+    if incoming_length > 0.000001 and outgoing_length > 0.000001 then
+      local cosine = (incoming_x * outgoing_x + incoming_y * outgoing_y)
+        / (incoming_length * outgoing_length)
+      cosine = math.max(-1, math.min(1, cosine))
+      local angle = math.deg(math.acos(cosine))
+      if angle > 1 then
+        metrics.corner_count = metrics.corner_count + 1
+        metrics.max_turn_degrees = math.max(metrics.max_turn_degrees, angle)
+        if angle > 90 then metrics.reversal_count = metrics.reversal_count + 1 end
+        metrics.turns[#metrics.turns + 1] = {
+          index = index,
+          position = PathMath.copy_position(current),
+          degrees = angle
+        }
+      end
+    end
+  end
+  return metrics
 end
 
 return PathMath

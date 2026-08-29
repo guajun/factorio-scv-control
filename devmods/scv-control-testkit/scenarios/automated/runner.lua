@@ -1,10 +1,13 @@
 local Follower = require("__factorio-scv-control__/scripts/follower")
 local Input = require("__factorio-scv-control__/scripts/input")
 local PathMath = require("__factorio-scv-control__/scripts/path_math")
+local PathSmoothing = require("__factorio-scv-control__/scripts/path_smoothing")
 local Queue = require("__factorio-scv-control__/scripts/queue")
 
 local START = {x = -28.80078125, y = -3.85546875}
 local GOAL = {x = -28.8828125, y = -7.3125}
+local OPEN_START = {x = -37.44921875, y = -19.66015625}
+local OPEN_GOAL = {x = -27.09765625, y = -30.76171875}
 local TEST_TIMEOUT_TICKS = 1200
 
 remote.add_interface("scv_test_runner", {
@@ -59,7 +62,8 @@ local function request_path(name, start_position, goal_position, character, expe
     name = name,
     start_position = PathMath.copy_position(start_position),
     goal_position = PathMath.copy_position(goal_position),
-    expected_no_path = expected_no_path == true
+    expected_no_path = expected_no_path == true,
+    character = character
   }
 end
 
@@ -70,7 +74,8 @@ local function finish_if_complete()
       or not suite.straight_done
       or not suite.corridor_done
       or not suite.unreachable_done
-      or not suite.queue_done then
+      or not suite.queue_done
+      or not suite.open_done then
     return
   end
 
@@ -130,6 +135,7 @@ script.on_init(function()
     corridor_done = false,
     unreachable_done = false,
     queue_done = false,
+    open_done = false,
     corridor = {segments = {}},
     movement_queue = {queue = {}, active = nil, completed = {}}
   }
@@ -164,6 +170,16 @@ script.on_init(function()
   storage.scv_testkit.path_character = surface.create_entity({
     name = "character",
     position = START,
+    force = "player"
+  })
+  storage.scv_testkit.straight_character = surface.create_entity({
+    name = "character",
+    position = {x = 0, y = 0},
+    force = "player"
+  })
+  storage.scv_testkit.open_character = surface.create_entity({
+    name = "character",
+    position = OPEN_START,
     force = "player"
   })
   local follower_character = surface.create_entity({
@@ -205,6 +221,7 @@ script.on_event(defines.events.on_script_path_request_finished, function(event)
     if request.name == "straight" then suite.straight_done = true end
     if request.name:find("corridor", 1, true) then suite.corridor_done = true end
     if request.name == "planner.unreachable_reports_no_path" then suite.unreachable_done = true end
+    if request.name == "planner.open_path_smoothing" then suite.open_done = true end
     finish_if_complete()
     return
   end
@@ -216,15 +233,40 @@ script.on_event(defines.events.on_script_path_request_finished, function(event)
     return
   end
 
-  local path = PathMath.path_from_event(event, request.goal_position)
+  local engine_path = PathMath.path_from_event(event)
+  local path = PathSmoothing.simplify(
+    game.surfaces[1],
+    request.character,
+    engine_path,
+    request.goal_position
+  )
   local path_distance = PathMath.polyline_distance(request.start_position, path)
   if request.name == "straight" then
     local direct = PathMath.distance(request.start_position, request.goal_position)
     expect("planner.straight_is_near_direct", path_distance / direct <= 1.15, {
       path_distance = path_distance,
-      direct_distance = direct
+      direct_distance = direct,
+      engine_waypoints = #engine_path,
+      smoothed_waypoints = #path
+    })
+    expect("planner.straight_removes_grid_corners", #path <= 2, {
+      engine_waypoints = #engine_path,
+      smoothed_waypoints = #path
     })
     suite.straight_done = true
+  elseif request.name == "planner.open_path_smoothing" then
+    local direct = PathMath.distance(request.start_position, request.goal_position)
+    local engine_distance = PathMath.polyline_distance(request.start_position, engine_path)
+    expect("planner.open_path_smoothing", path_distance / direct <= 1.02 and #path <= 2, {
+      direct_distance = direct,
+      engine_path_distance = engine_distance,
+      smoothed_path_distance = path_distance,
+      engine_waypoints = #engine_path,
+      smoothed_waypoints = #path
+    })
+    local turn_metrics = PathMath.turn_metrics(path)
+    expect("planner.open_path_has_no_reversal", turn_metrics.reversal_count == 0, turn_metrics)
+    suite.open_done = true
   elseif request.name == "corridor-baseline" then
     suite.corridor.baseline_path = path
     suite.corridor.baseline_distance = path_distance
@@ -237,7 +279,12 @@ script.on_event(defines.events.on_script_path_request_finished, function(event)
     )
     suite.corridor.via = via
     if not via then
-      record("planner.corridor_finds_alternate_via", false)
+      record("planner.corridor_finds_alternate_via", false, {
+        baseline_path = path,
+        baseline_distance = path_distance,
+        engine_path = engine_path,
+        engine_path_distance = PathMath.polyline_distance(START, engine_path)
+      })
       suite.corridor_done = true
     else
       request_path("corridor-via-first", START, via, suite.path_character)
@@ -280,9 +327,10 @@ script.on_event(defines.events.on_tick, function(event)
 
   if not suite.requests_started and event.tick >= suite.started_tick + 60 then
     suite.requests_started = true
-    request_path("straight", {x = 0, y = 0}, {x = 20, y = 0}, nil)
+    request_path("straight", {x = 0, y = 0}, {x = 20, y = 0}, suite.straight_character)
     request_path("corridor-baseline", START, GOAL, suite.path_character)
     request_path("planner.unreachable_reports_no_path", {x = 24, y = 25}, {x = 33, y = 25}, nil, true)
+    request_path("planner.open_path_smoothing", OPEN_START, OPEN_GOAL, suite.open_character)
   end
 
   if not suite.follower_done then
@@ -381,11 +429,13 @@ script.on_event(defines.events.on_tick, function(event)
     end
     if not suite.unreachable_done then record("planner.unreachable_reports_no_path", false, {status = "timeout"}) end
     if not suite.queue_done then record("queue.executes_all_commands", false, {status = "timeout"}) end
+    if not suite.open_done then record("planner.open_path_smoothing", false, {status = "timeout"}) end
     suite.follower_done = true
     suite.straight_done = true
     suite.corridor_done = true
     suite.unreachable_done = true
     suite.queue_done = true
+    suite.open_done = true
     finish_if_complete()
   end
 end)

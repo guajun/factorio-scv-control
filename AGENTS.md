@@ -19,6 +19,7 @@ Use `-Suite smoke` for mod loading and lifecycle checks, `-Suite integration` fo
 - `control.lua` is the production event adapter and orchestrator.
 - `scripts/planner.lua` owns asynchronous engine requests and alternate candidate selection.
 - `scripts/path_math.lua` contains deterministic path metrics and alternate-route calculations.
+- `scripts/path_smoothing.lua` removes collision-safe grid corners and reports exact final paths.
 - `scripts/follower.lua` advances a LuaControl along an accepted path and is shared with headless tests.
 - `scripts/input.lua` translates cursor data into commands and validates live player input.
 - `scripts/queue.lua`, `scripts/state.lua`, `scripts/path_render.lua`, and `scripts/planner_logger.lua` own their respective narrow concerns.

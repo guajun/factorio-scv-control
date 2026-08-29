@@ -1,6 +1,7 @@
 local Logger = require("scripts.planner_logger")
 local PathMath = require("scripts.path_math")
 local PathRender = require("scripts.path_render")
+local PathSmoothing = require("scripts.path_smoothing")
 local State = require("scripts.state")
 
 local Planner = {}
@@ -185,7 +186,13 @@ function Planner.handle_result(event, callbacks)
         status = event.try_again_later and "busy" or "no-path"
       })
     else
-      local segment_path = PathMath.path_from_event(event, request.goal_position)
+      local engine_path = PathMath.path_from_event(event)
+      local segment_path = PathSmoothing.simplify(
+        player.surface,
+        player.character,
+        engine_path,
+        request.goal_position
+      )
       optimization.segments[request.segment] = segment_path
       Logger.write(player, "path-candidate-result", {
         request_id = event.id,
@@ -195,7 +202,10 @@ function Planner.handle_result(event, callbacks)
         start = request.start_position,
         goal = request.goal_position,
         path_distance = PathMath.polyline_distance(request.start_position, segment_path),
-        path = segment_path
+        engine_path = engine_path,
+        smoothed_path = segment_path,
+        engine_turns = PathMath.turn_metrics(engine_path),
+        smoothed_turns = PathMath.turn_metrics(segment_path)
       })
     end
     finish_optimization(player, state, callbacks)
@@ -236,7 +246,14 @@ function Planner.handle_result(event, callbacks)
   local request_goal = request.goal_position or PathMath.copy_position(state.active.position)
   request.start_position = request_start
   request.goal_position = request_goal
-  local baseline_path, logged_path = PathMath.path_from_event(event, request_goal)
+  local engine_path, logged_path = PathMath.path_from_event(event)
+  local baseline_path = PathSmoothing.simplify(
+    player.surface,
+    player.character,
+    engine_path,
+    request_goal
+  )
+  local engine_path_distance = PathMath.polyline_distance(request_start, engine_path)
   local path_distance = PathMath.polyline_distance(request_start, baseline_path)
   local direct_distance = PathMath.distance(request_start, request_goal)
   local detour_ratio = direct_distance > 0 and path_distance / direct_distance or 1
@@ -248,11 +265,16 @@ function Planner.handle_result(event, callbacks)
     start = request_start,
     goal = request_goal,
     waypoint_count = #event.path,
+    engine_path_distance = engine_path_distance,
     path_distance = path_distance,
     direct_distance = direct_distance,
     detour_ratio = detour_ratio,
     optimization_eligible = detour_ratio > OPTIMIZE_DETOUR_THRESHOLD,
-    path = logged_path
+    engine_path = logged_path,
+    smoothed_path = baseline_path,
+    removed_waypoints = #engine_path - #baseline_path,
+    engine_turns = PathMath.turn_metrics(engine_path),
+    smoothed_turns = PathMath.turn_metrics(baseline_path)
   })
 
   if detour_ratio > OPTIMIZE_DETOUR_THRESHOLD

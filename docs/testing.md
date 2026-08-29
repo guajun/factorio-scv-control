@@ -56,7 +56,7 @@ The integration suite does not use a fixed tick count as a success condition. It
 3. Assert bounded outcomes such as path length, detour ratio, arrival error, selected candidate, or failure status.
 4. Run `-Suite integration`, then `-Suite all`.
 
-The corridor regression uses the exact coordinates captured by the planner logger. Factorio's baseline path is about 46.09 tiles; the shared alternate-via calculation produces a path near 35.35 tiles and must stay below 38.
+The corridor regression uses exact coordinates captured by the planner logger. It asserts alternate-route length and actual character arrival; a large turn at the wall-end via is expected. An open-area regression reproduces a captured 18-waypoint zigzag and requires collision-mask-aware smoothing to reduce it to a direct two-point path with no reversal. Planner JSONL records both engine and smoothed paths plus corner counts, maximum turn angle, and reversal count.
 
 ## Reload behavior
 
