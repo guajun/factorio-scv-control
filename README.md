@@ -28,13 +28,13 @@ For development, place or link this directory into the Factorio `mods` directory
 
 ## Local testing
 
-Run the local test harness from PowerShell 7:
+Run the fully headless agent test harness from PowerShell 7:
 
 ```powershell
 pwsh -File .\tools\test.ps1
 ```
 
-The script locates a Factorio installation matching `info.json`, copies the mod into an isolated temporary directory, creates a map, runs 120 simulation ticks, and removes the artifacts. Use `-FactorioExe <path>` to select an installation or `-KeepArtifacts` to retain the test files.
+The default command runs smoke and engine-backed integration suites in an isolated temporary directory. It validates loading, 120 lifecycle ticks, path optimization, movement following, queue order, cursor-to-command translation, and unreachable targets. Failures retain artifacts automatically. See [docs/testing.md](docs/testing.md).
 
 Create or refresh the interactive test save with:
 

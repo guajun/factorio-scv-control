@@ -28,13 +28,13 @@ SCV Control 是一个面向 Factorio 2.0 的实验性 Mod，用 RTS 风格的鼠
 
 ## 本地测试
 
-在 PowerShell 7 中运行：
+在 PowerShell 7 中运行纯无头 agent 测试：
 
 ```powershell
 pwsh -File .\tools\test.ps1
 ```
 
-脚本会查找与 `info.json` 匹配的 Factorio 安装，把 Mod 复制到隔离的临时目录，创建地图并运行 120 tick，然后清理测试产物。可用 `-FactorioExe <路径>` 指定游戏程序，或用 `-KeepArtifacts` 保留测试文件。
+默认命令会在隔离临时目录运行 smoke 与真实引擎 integration 套件，验证加载、120 tick 生命周期、路径优化、移动跟随、队列顺序、光标到指令的转换和不可达目标。失败时会自动保留诊断产物。详见 [docs/testing.md](docs/testing.md)。
 
 创建或刷新交互测试存档：
 

@@ -7,10 +7,12 @@ Date: 29. 08. 2026
     - Added asynchronous pathfinding, path visualization, and stuck recovery.
     - Added per-player queue limit and path visibility settings.
     - Added English and Simplified Chinese localisation.
-    - Added an isolated local Factorio load and simulation test harness.
+    - Added an isolated local Factorio load and lifecycle test harness.
     - Added a reusable interactive test scenario and local save generator.
     - Added automatic structured planner logging in the interactive test scenario.
+    - Added modular production runtime components shared by the local headless TestKit.
+    - Added an agent-facing smoke and integration runner with JSON reports and reliable exit codes.
   Bugfixes:
     - Fixed fast characters overshooting waypoints and repeatedly replanning around phantom obstacles.
     - Fixed old path renderings overlapping the current plan and appearing as a single detour.
-    - Added alternate-via optimization for extreme non-minimal paths returned by the engine pathfinder.
+    - Optimized extreme non-minimal paths returned by the engine pathfinder using an alternate via.

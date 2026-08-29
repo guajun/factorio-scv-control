@@ -1,6 +1,14 @@
 local TEST_AREA = {{-52, -34}, {52, 36}}
 local SPAWN = {x = 0, y = 0}
 
+local function automated_runner_active()
+  return remote.interfaces["scv_test_runner"] ~= nil
+end
+
+local function interactive_test_active()
+  return remote.interfaces["scv_test_interactive"] ~= nil and not automated_runner_active()
+end
+
 local ZONES = {
   {
     name = {"scv-test.zone-straight"},
@@ -247,6 +255,7 @@ end
 local test_lab = {}
 
 test_lab.add_remote_interface = function()
+  if not interactive_test_active() then return end
   if not remote.interfaces["scv_test_lab"] then
     remote.add_interface("scv_test_lab", {
       planner_logging_enabled = function()
@@ -257,6 +266,7 @@ test_lab.add_remote_interface = function()
 end
 
 test_lab.on_init = function()
+  if not interactive_test_active() then return end
   remote.call("freeplay", "set_disable_crashsite", true)
   remote.call("freeplay", "set_skip_intro", true)
   remote.call("freeplay", "set_created_items", {})
@@ -264,6 +274,7 @@ test_lab.on_init = function()
 end
 
 test_lab.on_configuration_changed = function()
+  if not interactive_test_active() then return end
   if not storage.scv_test_lab_built then
     build_test_lab()
   end
@@ -271,12 +282,14 @@ end
 
 test_lab.events = {
   [defines.events.on_player_created] = function(event)
+    if not interactive_test_active() then return end
     prepare_player(game.get_player(event.player_index))
   end
 }
 
 test_lab.on_nth_tick = {
   [1] = function()
+    if not interactive_test_active() then return end
     if game.is_multiplayer()
         and #game.connected_players == 0
         and not storage.scv_test_seed_save_created then
@@ -287,6 +300,7 @@ test_lab.on_nth_tick = {
 }
 
 test_lab.add_commands = function()
+  if not interactive_test_active() then return end
   commands.add_command("scv-test-reset", {"scv-test.command-reset-help"}, function(command)
     if command.player_index then
       game.get_player(command.player_index).teleport(SPAWN, game.surfaces[1])

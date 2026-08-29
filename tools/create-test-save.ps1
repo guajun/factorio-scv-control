@@ -9,6 +9,8 @@ param(
 $ErrorActionPreference = "Stop"
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $info = Get-Content -Raw -LiteralPath (Join-Path $projectRoot "info.json") | ConvertFrom-Json
+$testkitRoot = Join-Path $projectRoot "devmods\scv-control-testkit"
+$testkitInfo = Get-Content -Raw -LiteralPath (Join-Path $testkitRoot "info.json") | ConvertFrom-Json
 
 function Get-SteamLibraryRoots {
   $roots = [System.Collections.Generic.List[string]]::new()
@@ -52,20 +54,26 @@ function Resolve-FactorioExecutable {
 
 function Install-DevelopmentMod {
   $modsRoot = Join-Path $env:APPDATA "Factorio\mods"
-  $linkPath = Join-Path $modsRoot $info.name
   New-Item -ItemType Directory -Force -Path $modsRoot | Out-Null
 
-  if (Test-Path -LiteralPath $linkPath) {
-    $existing = Get-Item -LiteralPath $linkPath
-    $targetMatches = $existing.LinkType -eq "Junction" -and
-      $existing.Target -and
-      ([IO.Path]::GetFullPath(@($existing.Target)[0]) -eq [IO.Path]::GetFullPath($projectRoot))
-    if (-not $targetMatches) {
-      throw "Mod path already exists and is not the expected project junction: $linkPath"
+  $developmentMods = @(
+    @{name = $info.name; path = $projectRoot},
+    @{name = $testkitInfo.name; path = $testkitRoot}
+  )
+  foreach ($developmentMod in $developmentMods) {
+    $linkPath = Join-Path $modsRoot $developmentMod.name
+    if (Test-Path -LiteralPath $linkPath) {
+      $existing = Get-Item -LiteralPath $linkPath
+      $targetMatches = $existing.LinkType -eq "Junction" -and
+        $existing.Target -and
+        ([IO.Path]::GetFullPath(@($existing.Target)[0]) -eq [IO.Path]::GetFullPath($developmentMod.path))
+      if (-not $targetMatches) {
+        throw "Mod path already exists and is not the expected project junction: $linkPath"
+      }
     }
-  }
-  else {
-    New-Item -ItemType Junction -Path $linkPath -Target $projectRoot | Out-Null
+    else {
+      New-Item -ItemType Junction -Path $linkPath -Target $developmentMod.path | Out-Null
+    }
   }
 
   $modListPath = Join-Path $modsRoot "mod-list.json"
@@ -77,18 +85,20 @@ function Install-DevelopmentMod {
   }
 
   $entries = @($modList.mods)
-  $entry = $entries | Where-Object name -EQ $info.name | Select-Object -First 1
-  if ($entry) {
-    $entry.enabled = $true
-  }
-  else {
-    $entries += [pscustomobject]@{name = $info.name; enabled = $true}
+  foreach ($modName in @($info.name, $testkitInfo.name)) {
+    $entry = $entries | Where-Object name -EQ $modName | Select-Object -First 1
+    if ($entry) {
+      $entry.enabled = $true
+    }
+    else {
+      $entries += [pscustomobject]@{name = $modName; enabled = $true}
+    }
   }
   [pscustomobject]@{mods = $entries} |
     ConvertTo-Json -Depth 4 |
     Set-Content -LiteralPath $modListPath -Encoding utf8NoBOM
 
-  return $linkPath
+  return $developmentMods | ForEach-Object { Join-Path $modsRoot $_.name }
 }
 
 $factorio = Resolve-FactorioExecutable
@@ -119,10 +129,12 @@ $startedAt = $null
 try {
   New-Item -ItemType Directory -Force -Path $writeData, (Join-Path $writeData "saves"), $modsRoot | Out-Null
   New-Item -ItemType Junction -Path (Join-Path $modsRoot $info.name) -Target $projectRoot | Out-Null
+  New-Item -ItemType Junction -Path (Join-Path $modsRoot $testkitInfo.name) -Target $testkitRoot | Out-Null
   @{
     mods = @(
       @{name = "base"; enabled = $true},
-      @{name = $info.name; enabled = $true}
+      @{name = $info.name; enabled = $true},
+      @{name = $testkitInfo.name; enabled = $true}
     )
   } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $modsRoot "mod-list.json") -Encoding utf8NoBOM
 
@@ -152,7 +164,7 @@ enable-new-mods=true
   $arguments = @(
     '--config', ('"{0}"' -f $configPath),
     '--mod-directory', ('"{0}"' -f $modsRoot),
-    '--start-server-load-scenario', "$($info.name)/scv-control-test",
+    '--start-server-load-scenario', "$($testkitInfo.name)/interactive",
     '--server-settings', ('"{0}"' -f $serverSettingsPath),
     '--disable-audio'
   )
@@ -190,10 +202,12 @@ enable-new-mods=true
 
   New-Item -ItemType Directory -Force -Path (Split-Path $destinationPath -Parent) | Out-Null
   Copy-Item -LiteralPath $scenarioSave -Destination $destinationPath -Force:$Force
-  $modLink = Install-DevelopmentMod
+  $modLinks = Install-DevelopmentMod
 
   Write-Host "Created: $destinationPath" -ForegroundColor Green
-  Write-Host "Development mod: $modLink" -ForegroundColor Green
+  foreach ($modLink in $modLinks) {
+    Write-Host "Development mod: $modLink" -ForegroundColor Green
+  }
   Write-Host "Open Factorio, choose Load game, then SCV Control Test." -ForegroundColor Cyan
 }
 finally {
