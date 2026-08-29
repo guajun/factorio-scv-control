@@ -36,6 +36,14 @@ pwsh -File .\tools\test.ps1
 
 The script locates a Factorio installation matching `info.json`, copies the mod into an isolated temporary directory, creates a map, runs 120 simulation ticks, and removes the artifacts. Use `-FactorioExe <path>` to select an installation or `-KeepArtifacts` to retain the test files.
 
+Create or refresh the interactive test save with:
+
+```powershell
+pwsh -File .\tools\create-test-save.ps1 -Force
+```
+
+This installs a development junction in the normal Factorio mods directory, enables the mod, and creates `SCV Control Test.zip` in the normal saves directory. The save contains labelled zones for straight movement, slalom pathfinding, a narrow corridor, queued waypoints, an unreachable target, and future context actions. Use `/scv-test-home` or `/scv-test-reset` inside the save.
+
 ## Roadmap
 
 - Improve path following and recovery around dynamic obstacles.

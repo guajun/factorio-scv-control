@@ -36,6 +36,14 @@ pwsh -File .\tools\test.ps1
 
 脚本会查找与 `info.json` 匹配的 Factorio 安装，把 Mod 复制到隔离的临时目录，创建地图并运行 120 tick，然后清理测试产物。可用 `-FactorioExe <路径>` 指定游戏程序，或用 `-KeepArtifacts` 保留测试文件。
 
+创建或刷新交互测试存档：
+
+```powershell
+pwsh -File .\tools\create-test-save.ps1 -Force
+```
+
+该脚本会在正常 Factorio Mod 目录中建立开发链接、启用 Mod，并在正常存档目录创建 `SCV Control Test.zip`。存档包含直线移动、绕障寻路、窄通道、队列路径点、不可达目标和未来情境指令等测试区。存档内可使用 `/scv-test-home` 或 `/scv-test-reset`。
+
 ## 路线图
 
 - 改进动态障碍附近的路径跟随和脱困逻辑。
