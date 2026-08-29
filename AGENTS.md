@@ -10,7 +10,7 @@ Run this after changing runtime code, test fixtures, or tooling:
 pwsh -NoProfile -File .\tools\test.ps1 -Suite all
 ```
 
-The default suite must remain fully headless. Never launch the graphical Factorio client from automated tests. In particular, do not add LuaSimulation or main-menu simulation runs to the default runner: the Steam build displays launch confirmation UI and can interrupt the user.
+The default suite must remain fully headless. Never launch the graphical Factorio client from automated tests. In particular, do not add LuaSimulation or main-menu simulation runs to the default runner: the Steam build displays launch confirmation UI and can interrupt the user. Tests must succeed on terminal conditions, not because an arbitrary number of ticks elapsed; tick limits are failure guards only.
 
 Use `-Suite smoke` for mod loading and lifecycle checks, `-Suite integration` for behavior assertions, and `-KeepArtifacts` when investigating a passing run. Failed runs retain their artifacts automatically.
 

@@ -16,7 +16,9 @@ local function record(name, passed, details)
   suite.results[#suite.results + 1] = {
     name = name,
     passed = passed,
-    details = details
+    details = details,
+    completed_tick = game.tick,
+    elapsed_ticks = game.tick - suite.started_tick
   }
   if passed then
     suite.passed = suite.passed + 1
@@ -67,7 +69,8 @@ local function finish_if_complete()
       or not suite.follower_done
       or not suite.straight_done
       or not suite.corridor_done
-      or not suite.unreachable_done then
+      or not suite.unreachable_done
+      or not suite.queue_done then
     return
   end
 
@@ -77,6 +80,7 @@ local function finish_if_complete()
     factorio_version = script.active_mods.base,
     mod_version = script.active_mods["factorio-scv-control"],
     tick = game.tick,
+    duration_ticks = game.tick - suite.started_tick,
     passed = suite.passed,
     failed = suite.failed,
     results = suite.results
@@ -125,7 +129,9 @@ script.on_init(function()
     straight_done = false,
     corridor_done = false,
     unreachable_done = false,
-    corridor = {segments = {}}
+    queue_done = false,
+    corridor = {segments = {}},
+    movement_queue = {queue = {}, active = nil, completed = {}}
   }
 
   local surface = game.surfaces[1]
@@ -172,6 +178,16 @@ script.on_init(function()
     segment_start = {x = 0, y = 10}
   }
   storage.scv_testkit.follower_goal = {x = 12, y = 10}
+
+  local queue_character = surface.create_entity({
+    name = "character",
+    position = {x = 0, y = 15},
+    force = "player"
+  })
+  storage.scv_testkit.queue_character = queue_character
+  Queue.push(storage.scv_testkit.movement_queue, {id = 1, position = {x = 4, y = 15}})
+  Queue.push(storage.scv_testkit.movement_queue, {id = 2, position = {x = 8, y = 15}})
+  Queue.push(storage.scv_testkit.movement_queue, {id = 3, position = {x = 12, y = 15}})
   run_unit_tests()
 end)
 
@@ -245,7 +261,15 @@ script.on_event(defines.events.on_script_path_request_finished, function(event)
     expect("planner.corridor_candidate_bound", candidate_distance < 38, {
       candidate_distance = candidate_distance
     })
-    suite.corridor_done = true
+    local selected_path = candidate_distance < baseline_distance
+      and candidate
+      or suite.corridor.baseline_path
+    suite.corridor.follow_state = {
+      path = selected_path,
+      waypoint_index = 1,
+      segment_start = PathMath.copy_position(START)
+    }
+    suite.corridor.movement_started_tick = game.tick
   end
   finish_if_complete()
 end)
@@ -277,15 +301,91 @@ script.on_event(defines.events.on_tick, function(event)
     end
   end
 
+  if suite.corridor.follow_state and not suite.corridor_done then
+    local character = suite.path_character
+    local status = Follower.advance(character, suite.corridor.follow_state, GOAL)
+    if status == "arrived" then
+      local error_distance = PathMath.distance(character.position, GOAL)
+      expect("planner.corridor_character_reaches_goal",
+        error_distance <= Follower.tolerance(character), {
+          position = PathMath.copy_position(character.position),
+          error_distance = error_distance,
+          movement_ticks = game.tick - suite.corridor.movement_started_tick
+        })
+      suite.corridor_done = true
+    elseif status == "replan" then
+      record("planner.corridor_character_reaches_goal", false, {
+        status = "unexpected-replan",
+        position = PathMath.copy_position(character.position)
+      })
+      suite.corridor_done = true
+    end
+  end
+
+  if not suite.queue_done then
+    local queue_state = suite.movement_queue
+    local character = suite.queue_character
+    if not queue_state.active then
+      queue_state.active = Queue.pop(queue_state)
+      if queue_state.active then
+        queue_state.follow_state = {
+          path = {
+            PathMath.copy_position(character.position),
+            PathMath.copy_position(queue_state.active.position)
+          },
+          waypoint_index = 1,
+          segment_start = PathMath.copy_position(character.position)
+        }
+      else
+        local completed = queue_state.completed
+        expect("queue.executes_all_commands",
+          #completed == 3
+            and completed[1] == 1
+            and completed[2] == 2
+            and completed[3] == 3,
+          {
+            completed = completed,
+            position = PathMath.copy_position(character.position)
+          })
+        suite.queue_done = true
+      end
+    end
+
+    if queue_state.active then
+      local status = Follower.advance(character, queue_state.follow_state, queue_state.active.position)
+      if status == "arrived" then
+        queue_state.completed[#queue_state.completed + 1] = queue_state.active.id
+        queue_state.active = nil
+        queue_state.follow_state = nil
+      elseif status == "replan" then
+        record("queue.executes_all_commands", false, {
+          status = "unexpected-replan",
+          command_id = queue_state.active.id
+        })
+        suite.queue_done = true
+      end
+    end
+  end
+
+  finish_if_complete()
+  if suite.finished then return end
+
   if event.tick > suite.started_tick + TEST_TIMEOUT_TICKS then
     if not suite.follower_done then record("follower.reaches_goal", false, {status = "timeout"}) end
     if not suite.straight_done then record("planner.straight_is_near_direct", false, {status = "timeout"}) end
-    if not suite.corridor_done then record("planner.corridor_selects_shorter_side", false, {status = "timeout"}) end
+    if not suite.corridor_done then
+      local name = suite.corridor.follow_state
+        and "planner.corridor_character_reaches_goal"
+        or "planner.corridor_selects_shorter_side"
+      record(name, false, {status = "timeout"})
+    end
     if not suite.unreachable_done then record("planner.unreachable_reports_no_path", false, {status = "timeout"}) end
+    if not suite.queue_done then record("queue.executes_all_commands", false, {status = "timeout"}) end
     suite.follower_done = true
     suite.straight_done = true
     suite.corridor_done = true
     suite.unreachable_done = true
+    suite.queue_done = true
     finish_if_complete()
   end
 end)

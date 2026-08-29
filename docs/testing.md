@@ -24,8 +24,8 @@ Available suites:
 
 | Suite | Purpose |
 | --- | --- |
-| `smoke` | Loads settings/data/control stages, creates a map, reloads it, and runs 120 benchmark ticks. |
-| `integration` | Runs deterministic engine-backed planner, follower, queue, input-contract, and unreachable-target assertions. |
+| `smoke` | Loads settings/data/control stages and exits after Factorio successfully creates a map. |
+| `integration` | Runs deterministic engine-backed tasks until planning, character movement, queue execution, and failure cases actually complete. |
 | `all` | Runs both suites. This is the required pre-commit command. |
 
 Use `-Verbose` for Factorio stdout. Successful runs clean their temporary directory. Failures retain it and print its path; `-KeepArtifacts` retains successful artifacts as well.
@@ -38,7 +38,7 @@ The integration scenario writes:
 <test-root>/write-data/script-output/scv-control/test-results.json
 ```
 
-The schema includes Factorio and Mod versions, completion tick, pass/fail totals, and per-assertion details. The engine log also contains:
+The schema includes Factorio and Mod versions, actual duration ticks, pass/fail totals, and per-assertion completion details. The engine log also contains:
 
 ```text
 SCV_TESTKIT_REPORT {...}
@@ -46,6 +46,8 @@ SCV_TESTKIT_COMPLETE passed=N failed=N
 ```
 
 The external runner treats missing reports, timeouts, Lua errors, and failed assertions as nonzero exits.
+
+The integration suite does not use a fixed tick count as a success condition. It exits when every task reaches its terminal assertion. `TEST_TIMEOUT_TICKS` is only a failure guard for deadlocks and regressions.
 
 ## Adding a regression
 

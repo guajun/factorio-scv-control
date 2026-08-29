@@ -34,7 +34,7 @@ SCV Control 是一个面向 Factorio 2.0 的实验性 Mod，用 RTS 风格的鼠
 pwsh -File .\tools\test.ps1
 ```
 
-默认命令会在隔离临时目录运行 smoke 与真实引擎 integration 套件，验证加载、120 tick 生命周期、路径优化、移动跟随、队列顺序、光标到指令的转换和不可达目标。失败时会自动保留诊断产物。详见 [docs/testing.md](docs/testing.md)。
+默认命令会在隔离临时目录运行 smoke 与真实引擎 integration 套件，验证加载、路径优化、角色实际到达、队列实际执行完成、光标到指令的转换和不可达目标。Integration 会等待所有任务进入终态；固定 tick 只作为失败超时。详见 [docs/testing.md](docs/testing.md)。
 
 创建或刷新交互测试存档：
 

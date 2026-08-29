@@ -12,6 +12,7 @@ Date: 29. 08. 2026
     - Added automatic structured planner logging in the interactive test scenario.
     - Added modular production runtime components shared by the local headless TestKit.
     - Added an agent-facing smoke and integration runner with JSON reports and reliable exit codes.
+    - Made integration success depend on completed movement and queue tasks instead of a fixed tick window.
   Bugfixes:
     - Fixed fast characters overshooting waypoints and repeatedly replanning around phantom obstacles.
     - Fixed old path renderings overlapping the current plan and appearing as a single detour.

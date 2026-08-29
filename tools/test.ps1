@@ -108,18 +108,7 @@ function Invoke-SmokeSuite {
     throw "Smoke suite did not load the expected mod and control script."
   }
 
-  Write-Host "[smoke] Running 120 ticks" -ForegroundColor Cyan
-  Invoke-Factorio $Executable @(
-    "--config", $Config,
-    "--mod-directory", $Mods,
-    "--benchmark", $savePath,
-    "--benchmark-ticks", "120",
-    "--benchmark-runs", "1",
-    "--benchmark-sanitize",
-    "--benchmark-ignore-paused",
-    "--disable-audio"
-  )
-  Write-Host "[smoke] PASS" -ForegroundColor Green
+  Write-Host "[smoke] PASS: settings/data/control/on_init loaded and map saved" -ForegroundColor Green
 }
 
 function Invoke-IntegrationSuite {

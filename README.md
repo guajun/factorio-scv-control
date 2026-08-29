@@ -34,7 +34,7 @@ Run the fully headless agent test harness from PowerShell 7:
 pwsh -File .\tools\test.ps1
 ```
 
-The default command runs smoke and engine-backed integration suites in an isolated temporary directory. It validates loading, 120 lifecycle ticks, path optimization, movement following, queue order, cursor-to-command translation, and unreachable targets. Failures retain artifacts automatically. See [docs/testing.md](docs/testing.md).
+The default command runs smoke and engine-backed integration suites in an isolated temporary directory. It validates loading, path optimization, completed character movement, completed command queues, cursor-to-command translation, and unreachable targets. Integration exits when all tasks reach terminal assertions; fixed ticks are used only as failure timeouts. See [docs/testing.md](docs/testing.md).
 
 Create or refresh the interactive test save with:
 
