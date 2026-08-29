@@ -1,5 +1,6 @@
 local ARRIVAL_DISTANCE = 0.25
-local WAYPOINT_DISTANCE = 0.18
+local MIN_WAYPOINT_DISTANCE = 0.3
+local SPEED_DISTANCE_MULTIPLIER = 1.5
 local STUCK_CHECK_INTERVAL = 30
 local STUCK_DISTANCE = 0.05
 local MAX_STUCK_RETRIES = 3
@@ -22,6 +23,7 @@ local function player_state(player_index)
     active = nil,
     path = nil,
     waypoint_index = 1,
+    segment_start = nil,
     pending_request = nil,
     next_command_id = 1,
     stuck_retries = 0,
@@ -48,19 +50,29 @@ end
 local function direction_towards(from, to)
   local dx = to.x - from.x
   local dy = to.y - from.y
-  local abs_x = math.abs(dx)
-  local abs_y = math.abs(dy)
+  local orientation = math.atan2(dx, -dy) / (2 * math.pi) % 1
+  local direction_index = math.floor(orientation * 16 + 0.5) % 16
+  return direction_index
+end
 
-  if abs_x < abs_y * 0.4142 then
-    return dy < 0 and defines.direction.north or defines.direction.south
+local function movement_tolerance(player)
+  return math.max(MIN_WAYPOINT_DISTANCE, player.character_running_speed * SPEED_DISTANCE_MULTIPLIER)
+end
+
+local function passed_waypoint(position, segment_start, waypoint)
+  if not segment_start then
+    return false
   end
-  if abs_x > abs_y * 2.4142 then
-    return dx < 0 and defines.direction.west or defines.direction.east
+
+  local segment_x = waypoint.x - segment_start.x
+  local segment_y = waypoint.y - segment_start.y
+  if segment_x == 0 and segment_y == 0 then
+    return true
   end
-  if dx >= 0 then
-    return dy < 0 and defines.direction.northeast or defines.direction.southeast
-  end
-  return dy < 0 and defines.direction.northwest or defines.direction.southwest
+
+  local beyond_x = position.x - waypoint.x
+  local beyond_y = position.y - waypoint.y
+  return beyond_x * segment_x + beyond_y * segment_y >= 0
 end
 
 local function queue_limit(player)
@@ -112,6 +124,7 @@ local function clear_active(state)
   state.active = nil
   state.path = nil
   state.waypoint_index = 1
+  state.segment_start = nil
   state.pending_request = nil
   state.stuck_retries = 0
   state.last_position = nil
@@ -280,6 +293,7 @@ script.on_event(defines.events.on_script_path_request_finished, function(event)
     y = state.active.position.y
   })
   state.waypoint_index = 1
+  state.segment_start = {x = player.position.x, y = player.position.y}
   state.last_position = {x = player.position.x, y = player.position.y}
   state.last_stuck_check = game.tick
   draw_path(player, state.path)
@@ -320,14 +334,25 @@ local function update_player(player, tick)
     return
   end
 
+  local tolerance = movement_tolerance(player)
   local waypoint = state.path[state.waypoint_index]
-  while waypoint and squared_distance(character.position, waypoint) <= WAYPOINT_DISTANCE * WAYPOINT_DISTANCE do
+  while waypoint do
+    local is_final_waypoint = state.waypoint_index == #state.path
+    local reached = squared_distance(character.position, waypoint) <= tolerance * tolerance
+    local passed = not is_final_waypoint
+      and passed_waypoint(character.position, state.segment_start, waypoint)
+    if not reached and not passed then
+      break
+    end
+
+    state.segment_start = {x = waypoint.x, y = waypoint.y}
     state.waypoint_index = state.waypoint_index + 1
     waypoint = state.path[state.waypoint_index]
   end
 
   if not waypoint then
-    if squared_distance(character.position, state.active.position) <= ARRIVAL_DISTANCE * ARRIVAL_DISTANCE then
+    local arrival_distance = math.max(ARRIVAL_DISTANCE, tolerance)
+    if squared_distance(character.position, state.active.position) <= arrival_distance * arrival_distance then
       finish_active(player, state)
     else
       request_active_path(player, state)
