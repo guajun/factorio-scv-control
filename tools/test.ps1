@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [ValidateSet("smoke", "integration", "all")]
+  [ValidateSet("smoke", "integration", "benchmark", "all")]
   [string]$Suite = "all",
   [string]$FactorioExe = $env:FACTORIO_EXE,
   [int]$TimeoutSeconds = 90,
@@ -64,6 +64,16 @@ function Resolve-FactorioExecutable {
   throw "Factorio $($info.factorio_version) was not found. Pass -FactorioExe or set FACTORIO_EXE."
 }
 
+function Get-AvailableUdpPort {
+  $probe = [Net.Sockets.UdpClient]::new(0)
+  try {
+    return ([Net.IPEndPoint]$probe.Client.LocalEndPoint).Port
+  }
+  finally {
+    $probe.Dispose()
+  }
+}
+
 function Invoke-Factorio {
   param([string]$Executable, [string[]]$Arguments)
   $startInfo = [Diagnostics.ProcessStartInfo]::new()
@@ -122,10 +132,7 @@ function Invoke-IntegrationSuite {
     autosave_interval = 0
   } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $serverSettings -Encoding utf8NoBOM
 
-  $portProbe = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
-  $portProbe.Start()
-  $port = ([Net.IPEndPoint]$portProbe.LocalEndpoint).Port
-  $portProbe.Stop()
+  $port = Get-AvailableUdpPort
   $startedAt = Get-Date
   $arguments = @(
     '--config', ('"{0}"' -f $Config),
@@ -144,6 +151,9 @@ function Invoke-IntegrationSuite {
   try {
     while ((Get-Date) -lt $deadline) {
       Start-Sleep -Milliseconds 200
+      if ($launcher.HasExited) {
+        throw "Integration Factorio process exited before completing. See $logPath"
+      }
       if (-not (Test-Path -LiteralPath $logPath)) { continue }
       $log = Get-Content -Raw -LiteralPath $logPath
       if ($log -match "SCV_TESTKIT_COMPLETE") { $completed = $true; break }
@@ -173,6 +183,99 @@ function Invoke-IntegrationSuite {
     throw "Integration suite failed: $($report.failed) failed, $($report.passed) passed. Report: $reportPath"
   }
   Write-Host "[integration] PASS: $($report.passed) assertions" -ForegroundColor Green
+}
+
+function Invoke-BenchmarkSuite {
+  param([string]$Executable, [string]$Config, [string]$Mods, [string]$WriteData, [string]$Root)
+  $serverSettings = Join-Path $Root "benchmark-server-settings.json"
+  @{
+    name = "SCV Control Pathfinding Benchmark"
+    description = "Temporary local headless pathfinding benchmark server."
+    visibility = @{public = $false; lan = $false}
+    auto_pause = $false
+    autosave_interval = 0
+  } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $serverSettings -Encoding utf8NoBOM
+
+  $port = Get-AvailableUdpPort
+  $startedAt = Get-Date
+  $arguments = @(
+    '--config', ('"{0}"' -f $Config),
+    '--mod-directory', ('"{0}"' -f $Mods),
+    '--start-server-load-scenario', "$($testkitInfo.name)/pathfinding-benchmark",
+    '--server-settings', ('"{0}"' -f $serverSettings),
+    '--port', "$port",
+    '--disable-audio'
+  )
+
+  Write-Host "[benchmark] Starting pathfinding test set on port $port" -ForegroundColor Cyan
+  $launcher = Start-Process -FilePath $Executable -ArgumentList $arguments -WindowStyle Hidden -PassThru
+  $logPath = Join-Path $WriteData "factorio-current.log"
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  $completed = $false
+  try {
+    while ((Get-Date) -lt $deadline) {
+      Start-Sleep -Milliseconds 200
+      if ($launcher.HasExited) {
+        throw "Benchmark Factorio process exited before completing. See $logPath"
+      }
+      if (-not (Test-Path -LiteralPath $logPath)) { continue }
+      $log = Get-Content -Raw -LiteralPath $logPath
+      if ($log -match "SCV_BENCH_COMPLETE") { $completed = $true; break }
+      if ($log -match "non-recoverable error" -or $log -match "Error while running event") {
+        throw "Pathfinding benchmark failed. See $logPath"
+      }
+    }
+  }
+  finally {
+    Get-Process factorio -ErrorAction SilentlyContinue |
+      Where-Object { $_.StartTime -ge $startedAt.AddSeconds(-1) -and $_.Path -eq $Executable } |
+      Stop-Process -Force -ErrorAction SilentlyContinue
+    if (-not $launcher.HasExited) { Stop-Process -Id $launcher.Id -Force -ErrorAction SilentlyContinue }
+  }
+
+  if (-not $completed) {
+    throw "Pathfinding benchmark timed out after $TimeoutSeconds seconds. See $logPath"
+  }
+  $reportPath = Join-Path $WriteData "script-output\scv-control\pathfinding-benchmark.json"
+  if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+    throw "Pathfinding benchmark completed without a JSON report. See $logPath"
+  }
+  $report = Get-Content -Raw -LiteralPath $reportPath | ConvertFrom-Json
+  if ($report.schema_version -ne 1 -or $report.fixture_count -lt 1 -or $report.algorithm_count -lt 1) {
+    throw "Pathfinding benchmark report has an invalid contract. Report: $reportPath"
+  }
+  foreach ($fixture in $report.fixtures) {
+    $metrics = foreach ($algorithm in @(
+      'engine',
+      'engine-alternate',
+      'engine-alternate-global',
+      'grid-a-star',
+      'grid-weighted-a-star-2',
+      'grid-theta-star',
+      'grid-theta-star-exact'
+    )) {
+      $result = $fixture.results.$algorithm
+      if ($result.status -eq 'success') {
+        "${algorithm}=$([math]::Round($result.distance, 2))"
+      }
+      else {
+        "${algorithm}=$($result.status)"
+      }
+    }
+    Write-Host "[benchmark] $($fixture.id): $($metrics -join '  ')"
+  }
+  foreach ($summary in $report.algorithms.PSObject.Properties.Value | Sort-Object algorithm) {
+    $mean = if ($null -ne $summary.mean_distance_ratio) {
+      [math]::Round($summary.mean_distance_ratio, 3)
+    }
+    else { '-' }
+    $max = [math]::Round($summary.max_distance_ratio, 3)
+    Write-Host "[benchmark] summary $($summary.algorithm): solved=$($summary.solved_cases)/$($summary.expected_path_cases) mean/best=$mean max/best=$max expanded=$($summary.total_expanded_nodes) line/surface=$($summary.total_line_checks)/$($summary.total_surface_line_checks) requests=$($summary.total_requests) clearance-violations=$($summary.trajectory_clearance_violations)"
+  }
+  if ($report.failed -gt 0) {
+    throw "Pathfinding benchmark failed: $($report.failed) failed, $($report.passed) passed. Report: $reportPath"
+  }
+  Write-Host "[benchmark] PASS: $($report.fixture_count) fixtures x $($report.algorithm_count) algorithms" -ForegroundColor Green
 }
 
 $factorio = Resolve-FactorioExecutable
@@ -220,6 +323,9 @@ enable-new-mods=true
   }
   if ($Suite -in @("integration", "all")) {
     Invoke-IntegrationSuite $factorio $configPath $modsRoot $writeData $resolvedTestRoot
+  }
+  if ($Suite -in @("benchmark", "all")) {
+    Invoke-BenchmarkSuite $factorio $configPath $modsRoot $writeData $resolvedTestRoot
   }
   $failed = $false
   Write-Host "PASS: suite=$Suite Factorio=$actualVersion" -ForegroundColor Green

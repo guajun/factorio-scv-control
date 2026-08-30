@@ -20,18 +20,23 @@ Use `-Suite smoke` for mod loading and lifecycle checks, `-Suite integration` fo
 - `scripts/planner.lua` owns asynchronous engine requests and alternate candidate selection.
 - `scripts/path_math.lua` contains deterministic path metrics and alternate-route calculations.
 - `scripts/path_smoothing.lua` removes collision-safe grid corners and reports exact final paths.
+- `scripts/navigation_grid.lua` captures an inflated local collision snapshot for planner experiments.
+- `scripts/grid_search.lua` owns reusable A*, weighted A*, and Theta* graph search.
 - `scripts/trajectory.lua` decomposes continuous segments into hysteresis-controlled native movement primitives.
 - `scripts/follower.lua` advances a LuaControl along an accepted path and is shared with headless tests.
 - `scripts/input.lua` translates cursor data into commands and validates live player input.
 - `scripts/queue.lua`, `scripts/state.lua`, `scripts/path_render.lua`, and `scripts/planner_logger.lua` own their respective narrow concerns.
 - `devmods/scv-control-testkit` is a local-only companion mod. It must never become a production dependency.
 - `devmods/scv-control-testkit/scenarios/automated` owns engine-backed integration tests and writes the machine-readable report.
+- `devmods/scv-control-testkit/pathfinding` owns the shared fixture catalog, benchmark adapters, reports, and GUI renderer.
 
 Keep pure or actor-agnostic behavior in modules under `scripts/` so the automated scenario can execute the same code as production. Avoid copying planner or follower algorithms into tests.
 
 ## Test protocol
 
 The automated scenario writes `script-output/scv-control/test-results.json` and logs `SCV_TESTKIT_COMPLETE passed=N failed=N`. The PowerShell runner watches this protocol, terminates only Factorio processes it started, returns a nonzero exit code on failure, and preserves the isolated test root when diagnostics are needed.
+
+The pathfinding benchmark writes `script-output/scv-control/pathfinding-benchmark.json` and logs `SCV_BENCH_COMPLETE passed=N failed=N`. `-Suite all` must run it after integration. Keep its fixture definitions shared with `/scv-test-bench`; never maintain a second GUI-only geometry.
 
 Every regression fix should add or tighten an assertion in the automated scenario. Prefer exact fixture coordinates and bounded metrics over screenshots.
 

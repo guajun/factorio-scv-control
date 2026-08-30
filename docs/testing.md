@@ -10,6 +10,7 @@ edit production modules
   -> Factorio smoke-loads and benchmarks the mod
   -> a headless automated scenario builds deterministic fixtures
   -> production path/follower/input modules run against real Factorio objects
+  -> a separate pathfinding scenario compares engine and experimental planners
   -> JSON assertions and a completion marker are emitted
   -> the runner returns success/failure and cleans up
 ```
@@ -26,7 +27,8 @@ Available suites:
 | --- | --- |
 | `smoke` | Loads settings/data/control stages and exits after Factorio successfully creates a map. |
 | `integration` | Runs deterministic engine-backed tasks until planning, character movement, queue execution, and failure cases actually complete. |
-| `all` | Runs both suites. This is the required pre-commit command. |
+| `benchmark` | Runs the shared pathfinding test set against engine, alternate, A*, weighted A*, and Theta* variants. |
+| `all` | Runs smoke, integration, and benchmark. This is the required pre-commit command. |
 
 Use `-Verbose` for Factorio stdout. Successful runs clean their temporary directory. Failures retain it and print its path; `-KeepArtifacts` retains successful artifacts as well.
 
@@ -46,6 +48,8 @@ SCV_TESTKIT_COMPLETE passed=N failed=N
 ```
 
 The external runner treats missing reports, timeouts, Lua errors, and failed assertions as nonzero exits.
+
+The benchmark scenario writes `script-output/scv-control/pathfinding-benchmark.json` and `SCV_BENCH_COMPLETE passed=N failed=N`. See [pathfinding benchmark](pathfinding-benchmark.md) for fixtures, metrics, current results, and interactive commands.
 
 The integration suite does not use a fixed tick count as a success condition. It exits when every task reaches its terminal assertion. `TEST_TIMEOUT_TICKS` is only a failure guard for deadlocks and regressions.
 

@@ -35,7 +35,7 @@ SCV Control 是一个面向 Factorio 2.0 的实验性 Mod，用 RTS 风格的鼠
 pwsh -File .\tools\test.ps1
 ```
 
-默认命令会在隔离临时目录运行 smoke 与真实引擎 integration 套件，验证加载、路径优化、角色实际到达、队列实际执行完成、光标到指令的转换和不可达目标。Integration 会等待所有任务进入终态；固定 tick 只作为失败超时。详见 [测试](docs/testing.md) 与 [轨迹规划](docs/trajectory.md)。
+默认命令会在隔离临时目录运行 smoke、真实引擎 integration 和寻路 benchmark 套件，验证加载、路径优化、角色实际到达、队列实际执行完成、光标到指令的转换、不可达目标和多种规划器的对比行为。各套件会等待任务进入终态；固定 tick 只作为失败超时。详见 [测试](docs/testing.md)、[寻路基准](docs/pathfinding-benchmark.md) 与 [轨迹规划](docs/trajectory.md)。
 
 创建或刷新交互测试存档：
 
@@ -46,6 +46,8 @@ pwsh -File .\tools\create-test-save.ps1 -Force
 该脚本会在正常 Factorio Mod 目录中建立开发链接、启用 Mod，并在正常存档目录创建 `SCV Control Test.zip`。存档包含直线移动、绕障寻路、窄通道、队列路径点、不可达目标和未来情境指令等测试区。存档内可使用 `/scv-test-home` 或 `/scv-test-reset`。
 
 测试场会自动把每次移动点击、寻路请求、寻路结果、完整路径点、路径长度、绕行比例、备选探针、最终候选和重算原因写入 `%APPDATA%\Factorio\script-output\scv-control\planner.jsonl`。使用 `/scv-test-clear-log` 可以开始一次干净的记录。
+
+在开发存档中使用 `/scv-test-bench list` 可列出共享寻路夹具；`/scv-test-bench <fixture-id> [algorithm|all]` 会载入与 headless benchmark 完全相同的地图并绘制对比路径；`/scv-test-home` 返回主测试场。
 
 ## 路线图
 

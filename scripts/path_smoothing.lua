@@ -63,8 +63,48 @@ local function segment_is_clear(surface, character, from, to, clearance_margin)
   return true
 end
 
+function PathSmoothing.clearance_margin(character)
+  return Trajectory.clearance_margin(character.character_running_speed)
+end
+
+function PathSmoothing.position_is_clear(surface, character, position, clearance_margin)
+  return position_is_clear(
+    surface,
+    character,
+    position,
+    clearance_margin == nil and PathSmoothing.clearance_margin(character) or clearance_margin
+  )
+end
+
+function PathSmoothing.segment_is_clear(surface, character, from, to, clearance_margin)
+  return segment_is_clear(
+    surface,
+    character,
+    from,
+    to,
+    clearance_margin == nil and PathSmoothing.clearance_margin(character) or clearance_margin
+  )
+end
+
+function PathSmoothing.path_is_clear(surface, character, start_position, path, clearance_margin)
+  local previous = start_position
+  for _, point in ipairs(path) do
+    if not PathSmoothing.segment_is_clear(
+      surface,
+      character,
+      previous,
+      point,
+      clearance_margin
+    ) then
+      return false
+    end
+    previous = point
+  end
+  return true
+end
+
 function PathSmoothing.simplify(surface, character, engine_path, exact_goal)
-  local clearance_margin = Trajectory.clearance_margin(character.character_running_speed)
+  local clearance_margin = PathSmoothing.clearance_margin(character)
   local points = {}
   for _, point in ipairs(engine_path) do
     PathMath.append_unique_point(points, point)

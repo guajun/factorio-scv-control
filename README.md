@@ -35,7 +35,7 @@ Run the fully headless agent test harness from PowerShell 7:
 pwsh -File .\tools\test.ps1
 ```
 
-The default command runs smoke and engine-backed integration suites in an isolated temporary directory. It validates loading, path optimization, completed character movement, completed command queues, cursor-to-command translation, and unreachable targets. Integration exits when all tasks reach terminal assertions; fixed ticks are used only as failure timeouts. See [testing](docs/testing.md) and [trajectory planning](docs/trajectory.md).
+The default command runs smoke, engine-backed integration, and pathfinding benchmark suites in an isolated temporary directory. It validates loading, path optimization, completed character movement, completed command queues, cursor-to-command translation, unreachable targets, and comparative planner behavior. Suites exit on terminal assertions; fixed ticks are used only as failure timeouts. See [testing](docs/testing.md), [pathfinding benchmark](docs/pathfinding-benchmark.md), and [trajectory planning](docs/trajectory.md).
 
 Create or refresh the interactive test save with:
 
@@ -46,6 +46,8 @@ pwsh -File .\tools\create-test-save.ps1 -Force
 This installs a development junction in the normal Factorio mods directory, enables the mod, and creates `SCV Control Test.zip` in the normal saves directory. The save contains labelled zones for straight movement, slalom pathfinding, a narrow corridor, queued waypoints, an unreachable target, and future context actions. Use `/scv-test-home` or `/scv-test-reset` inside the save.
 
 The test scenario automatically records every movement click, path request, path result, waypoint, path length, detour ratio, alternate probe, selected candidate, and replan reason to `%APPDATA%\Factorio\script-output\scv-control\planner.jsonl`. Use `/scv-test-clear-log` to start a fresh capture.
+
+Use `/scv-test-bench list` in the developer save to list shared pathfinding fixtures. `/scv-test-bench <fixture-id> [algorithm|all]` loads the same geometry used headlessly and draws comparison paths; `/scv-test-home` returns to the main lab.
 
 ## Roadmap
 
