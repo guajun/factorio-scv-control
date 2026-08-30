@@ -25,6 +25,9 @@ local function clear_active(state)
   state.path = nil
   state.waypoint_index = 1
   state.segment_start = nil
+  state.trajectory = nil
+  state.recovery_waypoint_index = nil
+  state.recovery_attempts = 0
   state.pending_request = nil
   state.pending_optimization = nil
   state.stuck_retries = 0
@@ -44,6 +47,9 @@ local function activate_path(player, state, path)
   state.path = path
   state.waypoint_index = 1
   state.segment_start = PathMath.copy_position(player.position)
+  state.trajectory = nil
+  state.recovery_waypoint_index = nil
+  state.recovery_attempts = 0
   state.last_position = PathMath.copy_position(player.position)
   state.last_stuck_check = game.tick
   PathRender.draw(player, state, path)
@@ -144,7 +150,8 @@ local function update_player(player, tick)
     return
   end
 
-  local progress = Follower.advance(player, state, state.active.position)
+  local progress, diagnostics = Follower.advance(player, state, state.active.position)
+  Logger.write_follower(player, state, progress, diagnostics)
   if progress == "arrived" then
     finish_active(player, state)
     return

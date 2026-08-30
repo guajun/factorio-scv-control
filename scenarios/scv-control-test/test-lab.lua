@@ -260,6 +260,9 @@ test_lab.add_remote_interface = function()
     remote.add_interface("scv_test_lab", {
       planner_logging_enabled = function()
         return true
+      end,
+      follower_trace_enabled = function()
+        return true
       end
     })
   end
@@ -321,6 +324,7 @@ test_lab.add_commands = function()
   commands.add_command("scv-test-clear-log", {"scv-test.command-clear-log-help"}, function(command)
     if command.player_index then
       helpers.write_file("scv-control/planner.jsonl", "", false, command.player_index)
+      helpers.write_file("scv-control/follower.jsonl", "", false, command.player_index)
       game.get_player(command.player_index).print({"scv-test.log-cleared"})
     end
   end)

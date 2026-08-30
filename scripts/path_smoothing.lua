@@ -1,19 +1,20 @@
 local PathMath = require("scripts.path_math")
+local Trajectory = require("scripts.trajectory")
 
 local PathSmoothing = {}
 local SAMPLE_DISTANCE = 0.25
 local MAX_LOOKAHEAD_WAYPOINTS = 96
 
-local function translated_collision_box(character, position)
+local function translated_collision_box(character, position, clearance_margin)
   local box = character.prototype.collision_box
   return {
     left_top = {
-      x = position.x + box.left_top.x,
-      y = position.y + box.left_top.y
+      x = position.x + box.left_top.x - clearance_margin,
+      y = position.y + box.left_top.y - clearance_margin
     },
     right_bottom = {
-      x = position.x + box.right_bottom.x,
-      y = position.y + box.right_bottom.y
+      x = position.x + box.right_bottom.x + clearance_margin,
+      y = position.y + box.right_bottom.y + clearance_margin
     }
   }
 end
@@ -26,8 +27,8 @@ local function masks_collide(first, second)
   return false
 end
 
-local function position_is_clear(surface, character, position)
-  local area = translated_collision_box(character, position)
+local function position_is_clear(surface, character, position, clearance_margin)
+  local area = translated_collision_box(character, position, clearance_margin)
   local character_mask = character.prototype.collision_mask
   for _, entity in pairs(surface.find_entities(area)) do
     if entity ~= character
@@ -44,7 +45,7 @@ local function position_is_clear(surface, character, position)
   return true
 end
 
-local function segment_is_clear(surface, character, from, to)
+local function segment_is_clear(surface, character, from, to, clearance_margin)
   local length = PathMath.distance(from, to)
   if length <= 0.000001 then return true end
 
@@ -55,7 +56,7 @@ local function segment_is_clear(surface, character, from, to)
       x = from.x + (to.x - from.x) * ratio,
       y = from.y + (to.y - from.y) * ratio
     }
-    if not position_is_clear(surface, character, position) then
+    if not position_is_clear(surface, character, position, clearance_margin) then
       return false
     end
   end
@@ -63,6 +64,7 @@ local function segment_is_clear(surface, character, from, to)
 end
 
 function PathSmoothing.simplify(surface, character, engine_path, exact_goal)
+  local clearance_margin = Trajectory.clearance_margin(character.character_running_speed)
   local points = {}
   for _, point in ipairs(engine_path) do
     PathMath.append_unique_point(points, point)
@@ -74,7 +76,7 @@ function PathSmoothing.simplify(surface, character, engine_path, exact_goal)
       points[1] = PathMath.copy_position(character.position)
       last = points[1]
     end
-    if segment_is_clear(surface, character, last, exact_goal) then
+    if segment_is_clear(surface, character, last, exact_goal, clearance_margin) then
       PathMath.append_unique_point(points, exact_goal)
     end
   end
@@ -87,7 +89,13 @@ function PathSmoothing.simplify(surface, character, engine_path, exact_goal)
     local next_index = anchor + 1
     local farthest_candidate = math.min(#points, anchor + MAX_LOOKAHEAD_WAYPOINTS)
     for candidate = farthest_candidate, anchor + 1, -1 do
-      if segment_is_clear(surface, character, points[anchor], points[candidate]) then
+      if segment_is_clear(
+        surface,
+        character,
+        points[anchor],
+        points[candidate],
+        clearance_margin
+      ) then
         next_index = candidate
         break
       end

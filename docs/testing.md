@@ -58,6 +58,8 @@ The integration suite does not use a fixed tick count as a success condition. It
 
 The corridor regression uses exact coordinates captured by the planner logger. It asserts alternate-route length and actual character arrival; a large turn at the wall-end via is expected. An open-area regression reproduces a captured 18-waypoint zigzag and requires collision-mask-aware smoothing to reduce it to a direct two-point path with no reversal. Planner JSONL records both engine and smoothed paths plus corner counts, maximum turn angle, and reversal count.
 
+The trajectory suite first calibrates all 16 direction enum values against actual character displacement. Factorio characters expose 16 values but produce 8 unique movement vectors. Three paths halfway between native vectors must then complete with bounded cross-track error, no large direction jumps, no distance regressions, and a low switch rate.
+
 ## Reload behavior
 
 - Runtime files (`control.lua` and `scripts/*.lua`): reload the save or call `game.reload_mods()` in singleplayer.

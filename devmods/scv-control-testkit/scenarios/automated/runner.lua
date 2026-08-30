@@ -3,6 +3,7 @@ local Input = require("__factorio-scv-control__/scripts/input")
 local PathMath = require("__factorio-scv-control__/scripts/path_math")
 local PathSmoothing = require("__factorio-scv-control__/scripts/path_smoothing")
 local Queue = require("__factorio-scv-control__/scripts/queue")
+local Trajectory = require("__factorio-scv-control__/scripts/trajectory")
 
 local START = {x = -28.80078125, y = -3.85546875}
 local GOAL = {x = -28.8828125, y = -7.3125}
@@ -75,7 +76,9 @@ local function finish_if_complete()
       or not suite.corridor_done
       or not suite.unreachable_done
       or not suite.queue_done
-      or not suite.open_done then
+      or not suite.open_done
+      or not suite.trajectory_done
+      or not suite.calibration_done then
     return
   end
 
@@ -136,20 +139,40 @@ script.on_init(function()
     unreachable_done = false,
     queue_done = false,
     open_done = false,
+    trajectory_done = false,
+    calibration_done = false,
     corridor = {segments = {}},
-    movement_queue = {queue = {}, active = nil, completed = {}}
+    movement_queue = {queue = {}, active = nil, completed = {}},
+    trajectory_test = {
+      cases = {
+        {name = "east-half-step", goal = {x = 12, y = 22.386}},
+        {name = "west-half-step", goal = {x = 0, y = 24.772}},
+        {name = "southeast-half-step", goal = {x = 10, y = 31.454}}
+      },
+      index = 1,
+      total_ticks = 0,
+      total_switches = 0,
+      large_switches = 0,
+      min_run_ticks = nil,
+      max_cross_track_error = 0,
+      distance_increases = 0,
+      recoveries = 0,
+      completed = {},
+      history = {}
+    },
+    motion_calibration = {actors = {}, movement_ticks = 12}
   }
 
   local surface = game.surfaces[1]
   surface.request_to_generate_chunks({0, 0}, 3)
   surface.force_generate_chunk_requests()
-  for _, entity in pairs(surface.find_entities({{-52, -34}, {52, 36}})) do
+  for _, entity in pairs(surface.find_entities({{-52, -34}, {52, 52}})) do
     entity.destroy()
   end
 
   local tiles = {}
   for x = -52, 51 do
-    for y = -34, 35 do
+    for y = -34, 51 do
       tiles[#tiles + 1] = {name = "refined-concrete", position = {x, y}}
     end
   end
@@ -204,6 +227,25 @@ script.on_init(function()
   Queue.push(storage.scv_testkit.movement_queue, {id = 1, position = {x = 4, y = 15}})
   Queue.push(storage.scv_testkit.movement_queue, {id = 2, position = {x = 8, y = 15}})
   Queue.push(storage.scv_testkit.movement_queue, {id = 3, position = {x = 12, y = 15}})
+
+  storage.scv_testkit.trajectory_character = surface.create_entity({
+    name = "character",
+    position = {x = 0, y = 20},
+    force = "player"
+  })
+  for direction = 0, 15 do
+    local start = {x = -45 + direction * 6, y = 45}
+    local character = surface.create_entity({
+      name = "character",
+      position = start,
+      force = "player"
+    })
+    storage.scv_testkit.motion_calibration.actors[#storage.scv_testkit.motion_calibration.actors + 1] = {
+      direction = direction,
+      character = character,
+      start = start
+    }
+  end
   run_unit_tests()
 end)
 
@@ -303,7 +345,8 @@ script.on_event(defines.events.on_script_path_request_finished, function(event)
     expect("planner.corridor_selects_shorter_side", candidate_distance < baseline_distance * 0.85, {
       baseline_distance = baseline_distance,
       candidate_distance = candidate_distance,
-      via = suite.corridor.via
+      via = suite.corridor.via,
+      candidate_path = candidate
     })
     expect("planner.corridor_candidate_bound", candidate_distance < 38, {
       candidate_distance = candidate_distance
@@ -321,9 +364,175 @@ script.on_event(defines.events.on_script_path_request_finished, function(event)
   finish_if_complete()
 end)
 
+local function start_trajectory_case(suite)
+  local trajectory_test = suite.trajectory_test
+  local case = trajectory_test.cases[trajectory_test.index]
+  if not case then return false end
+  local position = PathMath.copy_position(suite.trajectory_character.position)
+  trajectory_test.follow_state = {
+    path = {position, PathMath.copy_position(case.goal)},
+    waypoint_index = 1,
+    segment_start = position
+  }
+  trajectory_test.last_distance = nil
+  trajectory_test.last_primitive = nil
+  trajectory_test.last_recovery_attempt = 0
+  trajectory_test.case_started_tick = game.tick
+  return true
+end
+
+local function update_trajectory_test(suite)
+  if suite.trajectory_done then return end
+  local trajectory_test = suite.trajectory_test
+  local case = trajectory_test.cases[trajectory_test.index]
+  if not case then
+    local switch_rate = trajectory_test.total_ticks > 0
+      and trajectory_test.total_switches / trajectory_test.total_ticks
+      or 0
+    expect("trajectory.vector_decomposition_multi_angle",
+      #trajectory_test.completed == #trajectory_test.cases
+        and (trajectory_test.min_run_ticks or 0) >= 2
+        and trajectory_test.max_cross_track_error <= 0.45
+        and trajectory_test.large_switches == 0
+        and trajectory_test.distance_increases <= 3
+        and switch_rate <= 0.35,
+      {
+        completed = trajectory_test.completed,
+        total_ticks = trajectory_test.total_ticks,
+        total_switches = trajectory_test.total_switches,
+        switch_rate = switch_rate,
+        min_run_ticks = trajectory_test.min_run_ticks,
+        max_cross_track_error = trajectory_test.max_cross_track_error,
+        large_switches = trajectory_test.large_switches,
+        distance_increases = trajectory_test.distance_increases,
+        recoveries = trajectory_test.recoveries
+      })
+    suite.trajectory_done = true
+    return
+  end
+
+  if not trajectory_test.follow_state then start_trajectory_case(suite) end
+  local character = suite.trajectory_character
+  local distance_before = PathMath.distance(character.position, case.goal)
+  if trajectory_test.last_distance and distance_before > trajectory_test.last_distance + 0.02 then
+    trajectory_test.distance_increases = trajectory_test.distance_increases + 1
+  end
+  trajectory_test.last_distance = distance_before
+
+  local status, diagnostics = Follower.advance(character, trajectory_test.follow_state, case.goal)
+  if status == "moving" then
+    trajectory_test.total_ticks = trajectory_test.total_ticks + 1
+    trajectory_test.max_cross_track_error = math.max(
+      trajectory_test.max_cross_track_error,
+      math.abs(diagnostics.cross_track_error or 0)
+    )
+    if diagnostics.switched then
+      trajectory_test.total_switches = trajectory_test.total_switches + 1
+      local previous = trajectory_test.last_primitive
+      if previous ~= nil then
+        local delta = math.abs(diagnostics.selected_primitive - previous)
+        delta = math.min(delta, 8 - delta)
+        if delta > 1 then trajectory_test.large_switches = trajectory_test.large_switches + 1 end
+      end
+    end
+    trajectory_test.last_primitive = diagnostics.selected_primitive
+    trajectory_test.history[#trajectory_test.history + 1] = {
+      tick = game.tick,
+      case = case.name,
+      position = PathMath.copy_position(character.position),
+      direction = diagnostics.selected_direction,
+      primitive = diagnostics.selected_primitive,
+      switched = diagnostics.switched,
+      cross_track_error = diagnostics.cross_track_error,
+      band = diagnostics.cross_track_band
+    }
+    if #trajectory_test.history > 40 then table.remove(trajectory_test.history, 1) end
+    local run_ticks = diagnostics.min_run_ticks
+    if run_ticks then
+      trajectory_test.min_run_ticks = trajectory_test.min_run_ticks
+        and math.min(trajectory_test.min_run_ticks, run_ticks)
+        or run_ticks
+    end
+    local recovery_attempt = diagnostics.recovery_attempt or 0
+    if recovery_attempt > trajectory_test.last_recovery_attempt then
+      trajectory_test.recoveries = trajectory_test.recoveries + 1
+      trajectory_test.last_recovery_attempt = recovery_attempt
+    end
+  elseif status == "arrived" then
+    local error_distance = PathMath.distance(character.position, case.goal)
+    local completed_trajectory = trajectory_test.follow_state.trajectory
+    if completed_trajectory then
+      local run_ticks = completed_trajectory.min_run_ticks
+        and math.min(completed_trajectory.min_run_ticks, completed_trajectory.current_run_ticks)
+        or completed_trajectory.current_run_ticks
+      trajectory_test.min_run_ticks = trajectory_test.min_run_ticks
+        and math.min(trajectory_test.min_run_ticks, run_ticks)
+        or run_ticks
+    end
+    trajectory_test.completed[#trajectory_test.completed + 1] = {
+      name = case.name,
+      ticks = game.tick - trajectory_test.case_started_tick,
+      error_distance = error_distance
+    }
+    trajectory_test.index = trajectory_test.index + 1
+    trajectory_test.follow_state = nil
+  else
+    record("trajectory.vector_decomposition_multi_angle", false, {
+      status = status,
+      case = case.name,
+      position = PathMath.copy_position(character.position),
+      diagnostics = diagnostics,
+      history = trajectory_test.history
+    })
+    suite.trajectory_done = true
+  end
+end
+
 script.on_event(defines.events.on_tick, function(event)
   local suite = storage.scv_testkit
   if suite.finished then return end
+
+  local calibration = suite.motion_calibration
+  local elapsed = event.tick - suite.started_tick
+  if not suite.calibration_done and elapsed <= calibration.movement_ticks then
+    for _, actor in ipairs(calibration.actors) do
+      actor.character.walking_state = {walking = true, direction = actor.direction}
+    end
+  elseif not suite.calibration_done then
+    local measured = {}
+    for _, actor in ipairs(calibration.actors) do
+      local displacement = {
+        x = actor.character.position.x - actor.start.x,
+        y = actor.character.position.y - actor.start.y
+      }
+      measured[#measured + 1] = {
+        direction = actor.direction,
+        displacement = displacement,
+        per_tick = {
+          x = displacement.x / calibration.movement_ticks,
+          y = displacement.y / calibration.movement_ticks
+        },
+        distance = math.sqrt(displacement.x * displacement.x + displacement.y * displacement.y)
+      }
+      Follower.stop(actor.character)
+    end
+    local min_alignment = 1
+    for _, sample in ipairs(measured) do
+      local expected = Trajectory.direction_vector(sample.direction)
+      local actual = {
+        x = sample.displacement.x / sample.distance,
+        y = sample.displacement.y / sample.distance
+      }
+      sample.expected = expected
+      sample.alignment = actual.x * expected.x + actual.y * expected.y
+      min_alignment = math.min(min_alignment, sample.alignment)
+    end
+    expect("trajectory.direction_calibration", min_alignment >= 0.999, {
+      min_alignment = min_alignment,
+      measured = measured
+    })
+    suite.calibration_done = true
+  end
 
   if not suite.requests_started and event.tick >= suite.started_tick + 60 then
     suite.requests_started = true
@@ -351,7 +560,7 @@ script.on_event(defines.events.on_tick, function(event)
 
   if suite.corridor.follow_state and not suite.corridor_done then
     local character = suite.path_character
-    local status = Follower.advance(character, suite.corridor.follow_state, GOAL)
+    local status, diagnostics = Follower.advance(character, suite.corridor.follow_state, GOAL)
     if status == "arrived" then
       local error_distance = PathMath.distance(character.position, GOAL)
       expect("planner.corridor_character_reaches_goal",
@@ -364,7 +573,9 @@ script.on_event(defines.events.on_tick, function(event)
     elseif status == "replan" then
       record("planner.corridor_character_reaches_goal", false, {
         status = "unexpected-replan",
-        position = PathMath.copy_position(character.position)
+        position = PathMath.copy_position(character.position),
+        diagnostics = diagnostics,
+        path = suite.corridor.follow_state.path
       })
       suite.corridor_done = true
     end
@@ -415,6 +626,8 @@ script.on_event(defines.events.on_tick, function(event)
     end
   end
 
+  update_trajectory_test(suite)
+
   finish_if_complete()
   if suite.finished then return end
 
@@ -430,12 +643,16 @@ script.on_event(defines.events.on_tick, function(event)
     if not suite.unreachable_done then record("planner.unreachable_reports_no_path", false, {status = "timeout"}) end
     if not suite.queue_done then record("queue.executes_all_commands", false, {status = "timeout"}) end
     if not suite.open_done then record("planner.open_path_smoothing", false, {status = "timeout"}) end
+    if not suite.trajectory_done then record("trajectory.vector_decomposition_multi_angle", false, {status = "timeout"}) end
+    if not suite.calibration_done then record("trajectory.direction_calibration", false, {status = "timeout"}) end
     suite.follower_done = true
     suite.straight_done = true
     suite.corridor_done = true
     suite.unreachable_done = true
     suite.queue_done = true
     suite.open_done = true
+    suite.trajectory_done = true
+    suite.calibration_done = true
     finish_if_complete()
   end
 end)

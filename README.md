@@ -12,6 +12,7 @@ SCV Control is an experimental Factorio 2.0 mod that replaces direct character m
 - The normal movement controls are consumed by the mod.
 - Right-clicks over GUI elements, entities, or while holding an item pass through to Factorio.
 - Pathfinding uses the current character's collision box and collision mask.
+- Arbitrary path segments are followed through hysteresis-controlled decomposition into native movement directions.
 - Each player has an independent, configurable command queue.
 
 This is an early prototype. Save before testing it in an important factory.
@@ -34,7 +35,7 @@ Run the fully headless agent test harness from PowerShell 7:
 pwsh -File .\tools\test.ps1
 ```
 
-The default command runs smoke and engine-backed integration suites in an isolated temporary directory. It validates loading, path optimization, completed character movement, completed command queues, cursor-to-command translation, and unreachable targets. Integration exits when all tasks reach terminal assertions; fixed ticks are used only as failure timeouts. See [docs/testing.md](docs/testing.md).
+The default command runs smoke and engine-backed integration suites in an isolated temporary directory. It validates loading, path optimization, completed character movement, completed command queues, cursor-to-command translation, and unreachable targets. Integration exits when all tasks reach terminal assertions; fixed ticks are used only as failure timeouts. See [testing](docs/testing.md) and [trajectory planning](docs/trajectory.md).
 
 Create or refresh the interactive test save with:
 
