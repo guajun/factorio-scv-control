@@ -52,7 +52,15 @@ function Planner.request_active(player, state, reason)
   return true
 end
 
-local function request_candidate_segment(player, state, optimization, segment, start_position, goal_position)
+local function request_candidate_segment(
+    player,
+    state,
+    optimization,
+    candidate_index,
+    segment,
+    start_position,
+    goal_position
+)
   local character = player.character
   local prototype = character.prototype
   local request_id = player.surface.request_path({
@@ -71,6 +79,7 @@ local function request_candidate_segment(player, state, optimization, segment, s
     kind = "candidate",
     player_index = player.index,
     command_id = state.active.id,
+    candidate_index = candidate_index,
     segment = segment,
     start_position = PathMath.copy_position(start_position),
     goal_position = PathMath.copy_position(goal_position)
@@ -78,71 +87,135 @@ local function request_candidate_segment(player, state, optimization, segment, s
   optimization.request_ids[request_id] = true
 end
 
+local function start_candidate(player, state, optimization, candidate_index)
+  local candidate = optimization.candidates[candidate_index]
+  if not candidate then return false end
+
+  candidate.segments = {}
+  optimization.active_candidate_index = candidate_index
+  request_candidate_segment(
+    player,
+    state,
+    optimization,
+    candidate_index,
+    1,
+    optimization.start_position,
+    candidate.via
+  )
+  request_candidate_segment(
+    player,
+    state,
+    optimization,
+    candidate_index,
+    2,
+    candidate.via,
+    optimization.goal_position
+  )
+  Logger.write(player, "path-optimization-candidate-request", {
+    command_id = optimization.command_id,
+    candidate_index = candidate_index,
+    fraction = candidate.fraction,
+    via = candidate.via
+  })
+  return true
+end
+
 local function start_optimization(player, state, request, baseline_path, baseline_distance, direct_distance)
-  local via = PathMath.alternate_via(
+  local via_specs = PathMath.alternate_vias(
     player.surface,
     player.character.name,
     request.start_position,
     request.goal_position,
     baseline_path
   )
-  if not via then return false end
+  if #via_specs == 0 then return false end
 
   local optimization = {
     command_id = request.command_id,
     start_position = PathMath.copy_position(request.start_position),
     goal_position = PathMath.copy_position(request.goal_position),
-    via = PathMath.copy_position(via),
     baseline_path = baseline_path,
     baseline_distance = baseline_distance,
     direct_distance = direct_distance,
-    segments = {},
+    candidates = {},
     request_ids = {}
   }
+  for index, spec in ipairs(via_specs) do
+    optimization.candidates[index] = {
+      fraction = spec.fraction,
+      via = PathMath.copy_position(spec.position)
+    }
+  end
   state.pending_request = nil
   state.pending_optimization = optimization
-  request_candidate_segment(player, state, optimization, 1, request.start_position, via)
-  request_candidate_segment(player, state, optimization, 2, via, request.goal_position)
   Logger.write(player, "path-optimization-request", {
     command_id = request.command_id,
     baseline_distance = baseline_distance,
     direct_distance = direct_distance,
     baseline_detour_ratio = baseline_distance / direct_distance,
-    via = PathMath.copy_position(via)
+    candidates = via_specs
   })
-  return true
+  return start_candidate(player, state, optimization, 1)
 end
 
 local function finish_optimization(player, state, callbacks)
   local optimization = state.pending_optimization
-  if not optimization
-      or optimization.segments[1] == nil
-      or optimization.segments[2] == nil then
+  if not optimization then return end
+
+  local candidate_results = {}
+  for index, candidate in ipairs(optimization.candidates) do
+    candidate_results[index] = {
+      fraction = candidate.fraction,
+      via = candidate.via,
+      status = candidate.path and "success" or "failed",
+      distance = candidate.distance,
+      path = candidate.path
+    }
+  end
+  local selected_path, selected_distance, selected_candidate_index = PathMath.select_shortest_path(
+    optimization.baseline_path,
+    optimization.baseline_distance,
+    optimization.candidates
+  )
+  Logger.write(player, "path-optimization-result", {
+    command_id = optimization.command_id,
+    status = selected_candidate_index and "success" or "baseline-retained",
+    baseline_distance = optimization.baseline_distance,
+    candidates = candidate_results,
+    selected = selected_candidate_index and "candidate" or "baseline",
+    selected_candidate_index = selected_candidate_index,
+    selected_distance = selected_distance,
+    improvement_ratio = (optimization.baseline_distance - selected_distance)
+      / optimization.baseline_distance
+  })
+  callbacks.activate_path(player, state, selected_path)
+end
+
+local function advance_optimization(player, state, callbacks)
+  local optimization = state.pending_optimization
+  if not optimization then return end
+  local candidate_index = optimization.active_candidate_index
+  local candidate = candidate_index and optimization.candidates[candidate_index] or nil
+  if not candidate
+      or candidate.segments[1] == nil
+      or candidate.segments[2] == nil then
     return
   end
 
-  local candidate_path = nil
-  local candidate_distance = nil
-  if optimization.segments[1] and optimization.segments[2] then
-    candidate_path = PathMath.combine_paths(optimization.segments[1], optimization.segments[2])
-    candidate_distance = PathMath.polyline_distance(optimization.start_position, candidate_path)
-  end
-  local use_candidate = candidate_distance
-    and candidate_distance + 0.01 < optimization.baseline_distance
-  local selected_path = use_candidate and candidate_path or optimization.baseline_path
-  Logger.write(player, "path-optimization-result", {
+  PathMath.complete_alternate_candidate(optimization.start_position, candidate)
+  Logger.write(player, "path-optimization-candidate-result", {
     command_id = optimization.command_id,
-    status = candidate_path and "success" or "candidate-failed",
-    via = optimization.via,
-    baseline_distance = optimization.baseline_distance,
-    candidate_distance = candidate_distance,
-    selected = use_candidate and "candidate" or "baseline",
-    improvement_ratio = candidate_distance
-      and (optimization.baseline_distance - candidate_distance) / optimization.baseline_distance
-      or 0,
-    candidate_path = candidate_path
+    candidate_index = candidate_index,
+    fraction = candidate.fraction,
+    via = candidate.via,
+    status = candidate.path and "success" or "failed",
+    distance = candidate.distance,
+    path = candidate.path
   })
-  callbacks.activate_path(player, state, selected_path)
+
+  optimization.active_candidate_index = nil
+  if start_candidate(player, state, optimization, candidate_index + 1) then return end
+  finish_optimization(player, state, callbacks)
 end
 
 function Planner.handle_result(event, callbacks)
@@ -166,10 +239,13 @@ function Planner.handle_result(event, callbacks)
 
   if request.kind == "candidate" then
     local optimization = state.pending_optimization
-    if not optimization or optimization.command_id ~= request.command_id then
+    if not optimization
+        or optimization.command_id ~= request.command_id
+        or optimization.active_candidate_index ~= request.candidate_index then
       Logger.write(player, "path-candidate-result", {
         request_id = event.id,
         command_id = request.command_id,
+        candidate_index = request.candidate_index,
         segment = request.segment,
         status = "stale"
       })
@@ -177,11 +253,14 @@ function Planner.handle_result(event, callbacks)
     end
 
     optimization.request_ids[event.id] = nil
+    local candidate = optimization.candidates[request.candidate_index]
     if event.try_again_later or not event.path then
-      optimization.segments[request.segment] = false
+      candidate.segments[request.segment] = false
       Logger.write(player, "path-candidate-result", {
         request_id = event.id,
         command_id = request.command_id,
+        candidate_index = request.candidate_index,
+        fraction = candidate.fraction,
         segment = request.segment,
         status = event.try_again_later and "busy" or "no-path"
       })
@@ -193,10 +272,12 @@ function Planner.handle_result(event, callbacks)
         engine_path,
         request.goal_position
       )
-      optimization.segments[request.segment] = segment_path
+      candidate.segments[request.segment] = segment_path
       Logger.write(player, "path-candidate-result", {
         request_id = event.id,
         command_id = request.command_id,
+        candidate_index = request.candidate_index,
+        fraction = candidate.fraction,
         segment = request.segment,
         status = "success",
         start = request.start_position,
@@ -208,7 +289,7 @@ function Planner.handle_result(event, callbacks)
         smoothed_turns = PathMath.turn_metrics(segment_path)
       })
     end
-    finish_optimization(player, state, callbacks)
+    advance_optimization(player, state, callbacks)
     return
   end
 

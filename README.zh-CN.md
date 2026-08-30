@@ -45,7 +45,7 @@ pwsh -File .\tools\create-test-save.ps1 -Force
 
 该脚本会在正常 Factorio Mod 目录中建立开发链接、启用 Mod，并在正常存档目录创建 `SCV Control Test.zip`。存档包含直线移动、绕障寻路、窄通道、队列路径点、不可达目标和未来情境指令等测试区。存档内可使用 `/scv-test-home` 或 `/scv-test-reset`。
 
-测试场会自动把每次移动点击、寻路请求、寻路结果、完整路径点、路径长度、绕行比例和重算原因写入 `%APPDATA%\Factorio\script-output\scv-control\planner.jsonl`。使用 `/scv-test-clear-log` 可以开始一次干净的记录。
+测试场会自动把每次移动点击、寻路请求、寻路结果、完整路径点、路径长度、绕行比例、备选探针、最终候选和重算原因写入 `%APPDATA%\Factorio\script-output\scv-control\planner.jsonl`。使用 `/scv-test-clear-log` 可以开始一次干净的记录。
 
 ## 路线图
 

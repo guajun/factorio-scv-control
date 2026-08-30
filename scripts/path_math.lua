@@ -3,7 +3,7 @@ local PathMath = {}
 PathMath.ARRIVAL_DISTANCE = 0.25
 PathMath.MIN_WAYPOINT_DISTANCE = 0.3
 PathMath.SPEED_DISTANCE_MULTIPLIER = 1.5
-PathMath.ALTERNATE_LATERAL_FRACTION = 0.75
+PathMath.ALTERNATE_LATERAL_FRACTIONS = {0.5, 0.75}
 
 function PathMath.squared_distance(a, b)
   local dx = a.x - b.x
@@ -53,12 +53,12 @@ function PathMath.path_from_event(event, exact_goal)
   return path, logged_path
 end
 
-function PathMath.alternate_via(surface, character_name, start_position, goal_position, baseline_path)
+function PathMath.alternate_vias(surface, character_name, start_position, goal_position, baseline_path)
   local direct_x = goal_position.x - start_position.x
   local direct_y = goal_position.y - start_position.y
   local direct_length = math.sqrt(direct_x * direct_x + direct_y * direct_y)
   if direct_length < 1 then
-    return nil
+    return {}
   end
 
   local perpendicular_x = -direct_y / direct_length
@@ -73,20 +73,42 @@ function PathMath.alternate_via(surface, character_name, start_position, goal_po
     end
   end
   if math.abs(largest_signed_excursion) < 2 then
-    return nil
+    return {}
   end
 
   local midpoint = {
     x = (start_position.x + goal_position.x) / 2,
     y = (start_position.y + goal_position.y) / 2
   }
-  -- Probe the opposite side of the obstacle suggested by the baseline's largest lateral detour.
-  local opposite_offset = -largest_signed_excursion * PathMath.ALTERNATE_LATERAL_FRACTION
-  local candidate = {
-    x = midpoint.x + perpendicular_x * opposite_offset,
-    y = midpoint.y + perpendicular_y * opposite_offset
-  }
-  return surface.find_non_colliding_position(character_name, candidate, 2, 0.25, false)
+  local vias = {}
+  for _, fraction in ipairs(PathMath.ALTERNATE_LATERAL_FRACTIONS) do
+    -- Probe the opposite side of the obstacle suggested by the baseline's largest lateral detour.
+    local opposite_offset = -largest_signed_excursion * fraction
+    local candidate = {
+      x = midpoint.x + perpendicular_x * opposite_offset,
+      y = midpoint.y + perpendicular_y * opposite_offset
+    }
+    local position = surface.find_non_colliding_position(
+      character_name,
+      candidate,
+      2,
+      0.25,
+      false
+    )
+    if position then
+      local duplicate = false
+      for _, existing in ipairs(vias) do
+        if PathMath.squared_distance(existing.position, position) < 0.25 then
+          duplicate = true
+          break
+        end
+      end
+      if not duplicate then
+        vias[#vias + 1] = {fraction = fraction, position = PathMath.copy_position(position)}
+      end
+    end
+  end
+  return vias
 end
 
 function PathMath.combine_paths(first, second)
@@ -98,6 +120,32 @@ function PathMath.combine_paths(first, second)
     PathMath.append_unique_point(combined, point)
   end
   return combined
+end
+
+function PathMath.complete_alternate_candidate(start_position, candidate)
+  if not candidate.segments
+      or not candidate.segments[1]
+      or not candidate.segments[2] then
+    return false
+  end
+
+  candidate.path = PathMath.combine_paths(candidate.segments[1], candidate.segments[2])
+  candidate.distance = PathMath.polyline_distance(start_position, candidate.path)
+  return true
+end
+
+function PathMath.select_shortest_path(baseline_path, baseline_distance, candidates)
+  local selected_path = baseline_path
+  local selected_distance = baseline_distance
+  local selected_candidate_index = nil
+  for index, candidate in ipairs(candidates) do
+    if candidate.distance and candidate.distance + 0.01 < selected_distance then
+      selected_path = candidate.path
+      selected_distance = candidate.distance
+      selected_candidate_index = index
+    end
+  end
+  return selected_path, selected_distance, selected_candidate_index
 end
 
 function PathMath.turn_metrics(points)

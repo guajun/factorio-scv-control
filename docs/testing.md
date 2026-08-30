@@ -56,7 +56,11 @@ The integration suite does not use a fixed tick count as a success condition. It
 3. Assert bounded outcomes such as path length, detour ratio, arrival error, selected candidate, or failure status.
 4. Run `-Suite integration`, then `-Suite all`.
 
-The corridor regression uses exact coordinates captured by the planner logger. It asserts alternate-route length and actual character arrival; a large turn at the wall-end via is expected. An open-area regression reproduces a captured 18-waypoint zigzag and requires collision-mask-aware smoothing to reduce it to a direct two-point path with no reversal. Planner JSONL records both engine and smoothed paths plus corner counts, maximum turn angle, and reversal count.
+The corridor regression uses exact coordinates captured by the planner logger. Factorio 2.0.77 returns a 47.10-tile baseline for a target only 9.09 tiles away. The regression evaluates lateral fractions 0.50 and 0.75 in strict sequence, requires the nearer probe to beat the overshooting fallback, bounds the selected route below 34 tiles, and then waits for the character to arrive. The accepted fixture currently selects a 28.81-tile route and completes movement in 137 ticks.
+
+Alternate probes are deliberately sequential. Engine-backed experiments showed that unrelated simultaneous path requests can change Factorio's non-optimal pathfinder result. The two segments belonging to one probe may run together, but the next probe starts only after both previous segment requests terminate. This costs up to four additional engine requests only when the baseline path exceeds twice the direct distance.
+
+The open-area regression reproduces a captured 18-waypoint zigzag and requires collision-mask-aware smoothing to reduce it to a direct two-point path with no reversal. Planner JSONL records engine and smoothed paths, per-candidate fractions, vias and distances, the selected candidate, corner counts, maximum turn angle, and reversal count.
 
 The trajectory suite first calibrates all 16 direction enum values against actual character displacement. Factorio characters expose 16 values but produce 8 unique movement vectors. Three paths halfway between native vectors must then complete with bounded cross-track error, no large direction jumps, no distance regressions, and a low switch rate.
 

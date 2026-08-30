@@ -18,5 +18,6 @@ Date: 29. 08. 2026
   Bugfixes:
     - Fixed fast characters overshooting waypoints and repeatedly replanning around phantom obstacles.
     - Fixed old path renderings overlapping the current plan and appearing as a single detour.
-    - Optimized extreme non-minimal paths returned by the engine pathfinder using an alternate via.
+    - Optimized extreme non-minimal paths returned by the engine pathfinder using sequential near and fallback alternate vias.
+    - Fixed alternate routes overshooting the nearer end of long obstacles when the fallback via was unnecessarily far away.
     - Removed collision-safe grid zigzags and endpoint reversals from engine paths before following them.
