@@ -4,6 +4,12 @@ New entries go at the top. Keep failed hypotheses and operational mistakes: the 
 
 Each entry should state the question, exact fixture/version, measured result, falsified assumption, and decision. Generated JSON remains the source of exact per-path data; this document records why the result changed the design.
 
+## 2026-08-31 - Same-version reload does not run configuration migration
+
+The first strict-zone migration only rebuilt the test lab from `on_configuration_changed`. `game.reload_mods()` loaded the new control checksums but did not raise that migration path because both development mods still reported version `0.1.0`; the visible map therefore remained unchanged.
+
+**Decision:** The interactive TestKit checks its fixture schema version on the first tick and rebuilds when stale. `/scv-test-reset` remains the explicit immediate rebuild command. Do not assume source checksum reload is equivalent to a Mod version configuration change.
+
 ## 2026-08-31 - Production removes alternate via and uses safe local comparison
 
 Production now makes one Factorio baseline request, validates the complete smoothed path against the trajectory envelope, and compares it with conservative local A* inside the baseline-length ellipse. It chooses the shorter safe result; there is no detour-ratio gate, lateral fraction, or forced intermediate point.

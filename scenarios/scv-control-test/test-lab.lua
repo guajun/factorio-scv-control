@@ -311,6 +311,9 @@ test_lab.events = {
 test_lab.on_nth_tick = {
   [1] = function()
     if not interactive_test_active() then return end
+    if storage.scv_test_lab_version ~= TEST_LAB_VERSION then
+      build_test_lab()
+    end
     if game.is_multiplayer()
         and #game.connected_players == 0
         and not storage.scv_test_seed_save_created then
