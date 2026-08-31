@@ -49,7 +49,7 @@ SCV_TESTKIT_COMPLETE passed=N failed=N
 
 The external runner treats missing reports, timeouts, Lua errors, and failed assertions as nonzero exits.
 
-The benchmark scenario writes `script-output/scv-control/pathfinding-benchmark.json` and `SCV_BENCH_COMPLETE passed=N failed=N`. See [pathfinding benchmark](pathfinding-benchmark.md) for fixtures, metrics, current results, and interactive commands.
+The benchmark scenario writes `script-output/scv-control/pathfinding-benchmark.json` and `SCV_BENCH_COMPLETE passed=N failed=N`. See [pathfinding benchmark](pathfinding-benchmark.md) for fixtures, metrics, current results, and interactive commands. See [navigation policy](navigation-policy.md) for the complete hardcoded-parameter inventory.
 
 The integration suite does not use a fixed tick count as a success condition. It exits when every task reaches its terminal assertion. `TEST_TIMEOUT_TICKS` is only a failure guard for deadlocks and regressions.
 

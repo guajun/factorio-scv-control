@@ -49,6 +49,8 @@ The test scenario automatically records every movement click, path request, path
 
 Use `/scv-test-bench list` in the developer save to list shared pathfinding fixtures. `/scv-test-bench <fixture-id> [algorithm|all]` loads the same geometry used headlessly and draws comparison paths; `/scv-test-home` returns to the main lab.
 
+In the developer save, every normal completed move plan is also compared against enabled benchmark algorithms and drawn with a checkbox legend. Use `/scv-test-preview off` to disable this or `/scv-test-preview show` to reopen the panel. See the [navigation policy inventory](docs/navigation-policy.md) for all runtime tuning constants.
+
 ## Roadmap
 
 - Improve path following and recovery around dynamic obstacles.

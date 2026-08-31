@@ -325,6 +325,7 @@ test_lab.add_commands = function()
     if command.player_index then
       helpers.write_file("scv-control/planner.jsonl", "", false, command.player_index)
       helpers.write_file("scv-control/follower.jsonl", "", false, command.player_index)
+      helpers.write_file("scv-control/live-preview.jsonl", "", false, command.player_index)
       game.get_player(command.player_index).print({"scv-test.log-cleared"})
     end
   end)

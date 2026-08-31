@@ -1,4 +1,5 @@
 local PathMath = require("scripts.path_math")
+local Policy = require("scripts.navigation_policy")
 local Trajectory = require("scripts.trajectory")
 
 local Follower = {}
@@ -21,7 +22,7 @@ local function begin_waypoint_recovery(control, state)
     state.recovery_waypoint_index = state.waypoint_index
     state.recovery_attempts = 1
   end
-  if state.recovery_attempts > 1 then return false end
+  if state.recovery_attempts > Policy.follower.max_waypoint_recoveries then return false end
   state.segment_start = PathMath.copy_position(control.position)
   state.trajectory = nil
   return true

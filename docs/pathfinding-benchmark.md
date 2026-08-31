@@ -18,7 +18,7 @@ The scenario completes only after every engine request and algorithm result reac
 
 ## Test set
 
-Fixture version 1 contains:
+Fixture version 2 contains:
 
 | Fixture | Concern |
 | --- | --- |
@@ -28,6 +28,7 @@ Fixture version 1 contains:
 | `narrow-corridor` | Clearance and straight travel between parallel walls. |
 | `u-trap` | A cul-de-sac that initially points away from the goal. |
 | `slalom` | Multiple alternating topology decisions. |
+| `captured-slalom-return` | Exact normal-click regression where the engine switches from the north route to a late south portal. |
 | `gate-open` | Dynamic-static snapshot before a gate closes. |
 | `gate-closed` | Same world after the blocking wall is inserted. |
 | `unreachable-box` | Complete enclosure and no-path termination. |
@@ -40,7 +41,7 @@ Definitions live in `devmods/scv-control-testkit/pathfinding/fixtures.lua`. Do n
 | --- | --- |
 | `engine` | One Factorio `request_path`, followed by production smoothing. |
 | `engine-alternate` | Current sequential 0.50/0.75 via strategy. |
-| `engine-alternate-global` | Same candidates, then one full-path collision-safe string pull to measure forced-via overhead. |
+| `engine-alternate-global` | Evaluates alternate candidates regardless of the production `2x` gate, then applies a full-path collision-safe string pull. |
 | `grid-a-star` | Unweighted 8-neighbor A* on a 0.5-tile inflated collision snapshot. |
 | `grid-weighted-a-star-2` | The same search with heuristic weight 2. |
 | `grid-theta-star` | Any-angle parent relaxation using the fast in-memory snapshot. |
@@ -55,17 +56,17 @@ Node expansions and snapshot/Factorio line checks are deterministic work metrics
 
 ## Factorio 2.0.77 baseline
 
-The current nine-fixture run passes 72 assertions across seven algorithms:
+The current ten-fixture run passes all reachability, collision, dynamic-state, and captured-quality assertions across seven algorithms. The exact totals are emitted in the JSON report.
 
 | Algorithm | Mean / best | Max / best | Expanded | Snapshot lines | Factorio lines | Requests | Clearance misses |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `engine` | 1.225 | 2.008 | 0 | 0 | 0 | 9 | 5 |
-| `engine-alternate` | 1.019 | 1.063 | 0 | 0 | 0 | 21 | 5 |
-| `engine-alternate-global` | 1.008 | 1.041 | 0 | 0 | 0 | 21 | 5 |
-| `grid-a-star` | 1.012 | 1.034 | 9385 | 37412 | 0 | 0 | 5 |
-| `grid-weighted-a-star-2` | 1.026 | 1.117 | 7443 | 25325 | 0 | 0 | 5 |
-| `grid-theta-star` | 1.011 | 1.034 | 8235 | 42631 | 0 | 0 | 5 |
-| `grid-theta-star-exact` | 1.016 | 1.046 | 8179 | 42300 | 42225 | 0 | 0 |
+| `engine` | 1.214 | 2.008 | 0 | 0 | 0 | 10 | 6 |
+| `engine-alternate` | 1.032 | 1.108 | 0 | 0 | 0 | 34 | 6 |
+| `engine-alternate-global` | 1.002 | 1.021 | 0 | 0 | 0 | 34 | 6 |
+| `grid-a-star` | 1.013 | 1.034 | 10520 | 41944 | 0 | 0 | 6 |
+| `grid-weighted-a-star-2` | 1.028 | 1.132 | 7545 | 25845 | 0 | 0 | 6 |
+| `grid-theta-star` | 1.013 | 1.034 | 8928 | 46412 | 0 | 0 | 6 |
+| `grid-theta-star-exact` | 1.017 | 1.046 | 8987 | 46689 | 46580 | 0 | 0 |
 
 On `long-wall-return`, the measured lengths are:
 
@@ -76,6 +77,19 @@ engine-alternate-global   24.66
 grid-theta-star           25.49
 grid-theta-star-exact     25.79
 ```
+
+On `captured-slalom-return`, the measured lengths are:
+
+```text
+engine                    39.05
+engine-alternate          39.05
+engine-alternate-global   35.99
+grid-a-star               35.25
+grid-theta-star           35.38
+grid-theta-star-exact     35.28
+```
+
+The production threshold skips this case because `39.05 / 32.49 = 1.202`, even though the engine result is 10.8% longer than the shortest observed result.
 
 The experiment establishes four boundaries:
 
@@ -100,3 +114,14 @@ The existing developer save loads the same fixture catalog:
 Omitting the algorithm runs `engine-alternate-global`. The command creates or refreshes the `scv-pathfinding-bench` surface, moves the player to the fixture start, and renders selected paths with a color legend. `all` is intentionally explicit because exact Theta can pause the GUI while it performs continuous geometry queries.
 
 After a result is drawn, right-click the red goal marker to compare the production planner on the same geometry. `/scv-test-home` returns to the normal test lab.
+
+Normal accepted move plans in the interactive TestKit also trigger a live comparison on the current surface. Every enabled algorithm is drawn with its own color/dash style and listed in a checkbox panel. Checkboxes control current visibility and whether an algorithm runs on the next plan. Exact Theta is available but marked high-cost.
+
+```text
+/scv-test-preview on
+/scv-test-preview off
+/scv-test-preview show
+/scv-test-preview clear
+```
+
+Each completed comparison is appended to `%APPDATA%\Factorio\script-output\scv-control\live-preview.jsonl`.

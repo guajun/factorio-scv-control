@@ -4,12 +4,9 @@ local Logger = require("scripts.planner_logger")
 local PathMath = require("scripts.path_math")
 local PathRender = require("scripts.path_render")
 local Planner = require("scripts.planner")
+local Policy = require("scripts.navigation_policy")
 local Queue = require("scripts.queue")
 local State = require("scripts.state")
-
-local STUCK_CHECK_INTERVAL = 30
-local STUCK_DISTANCE = 0.05
-local MAX_STUCK_RETRIES = 3
 
 local start_next_command
 
@@ -160,10 +157,12 @@ local function update_player(player, tick)
     return
   end
 
-  if tick - state.last_stuck_check < STUCK_CHECK_INTERVAL then return end
-  if PathMath.squared_distance(character.position, state.last_position) < STUCK_DISTANCE * STUCK_DISTANCE then
+  if tick - state.last_stuck_check < Policy.follower.stuck_check_interval then return end
+  local stuck_distance = Policy.follower.stuck_distance
+  if PathMath.squared_distance(character.position, state.last_position)
+      < stuck_distance * stuck_distance then
     state.stuck_retries = state.stuck_retries + 1
-    if state.stuck_retries > MAX_STUCK_RETRIES then
+    if state.stuck_retries > Policy.follower.max_stuck_retries then
       player.print({"scv-control.stuck"})
       finish_active(player, state)
     else

@@ -17,6 +17,8 @@ Date: 29. 08. 2026
     - Added per-tick follower traces and engine-backed direction calibration in the local TestKit.
     - Added a shared nine-fixture pathfinding test set with headless JSON comparison reports and GUI rendering.
     - Added experimental A*, weighted A*, fast Theta*, and exact-collision Theta* benchmark adapters.
+    - Added live multi-algorithm plan overlays, visibility controls, and structured comparison logs to the local TestKit.
+    - Centralized 28 production navigation constants in one documented policy module.
   Bugfixes:
     - Fixed fast characters overshooting waypoints and repeatedly replanning around phantom obstacles.
     - Fixed old path renderings overlapping the current plan and appearing as a single detour.

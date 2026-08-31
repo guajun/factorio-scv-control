@@ -49,6 +49,8 @@ pwsh -File .\tools\create-test-save.ps1 -Force
 
 在开发存档中使用 `/scv-test-bench list` 可列出共享寻路夹具；`/scv-test-bench <fixture-id> [algorithm|all]` 会载入与 headless benchmark 完全相同的地图并绘制对比路径；`/scv-test-home` 返回主测试场。
 
+开发存档中的每次普通移动规划完成后，也会运行已启用的 benchmark 算法并以 checkbox 图例叠加显示。使用 `/scv-test-preview off` 可关闭，`/scv-test-preview show` 可重新打开面板。所有运行时调参数见[导航策略清单](docs/navigation-policy.md)。
+
 ## 路线图
 
 - 改进动态障碍附近的路径跟随和脱困逻辑。

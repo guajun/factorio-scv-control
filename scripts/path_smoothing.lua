@@ -1,9 +1,8 @@
 local PathMath = require("scripts.path_math")
+local Policy = require("scripts.navigation_policy")
 local Trajectory = require("scripts.trajectory")
 
 local PathSmoothing = {}
-local SAMPLE_DISTANCE = 0.25
-local MAX_LOOKAHEAD_WAYPOINTS = 96
 
 local function translated_collision_box(character, position, clearance_margin)
   local box = character.prototype.collision_box
@@ -47,9 +46,9 @@ end
 
 local function segment_is_clear(surface, character, from, to, clearance_margin)
   local length = PathMath.distance(from, to)
-  if length <= 0.000001 then return true end
+  if length <= Policy.diagnostics.position_epsilon then return true end
 
-  local samples = math.max(1, math.ceil(length / SAMPLE_DISTANCE))
+  local samples = math.max(1, math.ceil(length / Policy.smoothing.sample_distance))
   for index = 1, samples do
     local ratio = index / samples
     local position = {
@@ -127,7 +126,10 @@ function PathSmoothing.simplify(surface, character, engine_path, exact_goal)
   local anchor = 1
   while anchor < #points do
     local next_index = anchor + 1
-    local farthest_candidate = math.min(#points, anchor + MAX_LOOKAHEAD_WAYPOINTS)
+    local farthest_candidate = math.min(
+      #points,
+      anchor + Policy.smoothing.max_lookahead_waypoints
+    )
     for candidate = farthest_candidate, anchor + 1, -1 do
       if segment_is_clear(
         surface,

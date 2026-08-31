@@ -2,10 +2,25 @@ local Logger = require("scripts.planner_logger")
 local PathMath = require("scripts.path_math")
 local PathRender = require("scripts.path_render")
 local PathSmoothing = require("scripts.path_smoothing")
+local Policy = require("scripts.navigation_policy")
 local State = require("scripts.state")
 
 local Planner = {}
-local OPTIMIZE_DETOUR_THRESHOLD = 2
+local PREVIEW_INTERFACE = "scv_pathfinding_preview"
+
+local function notify_preview(player, command_id, start_position, goal_position, path, status)
+  local interface = remote.interfaces[PREVIEW_INTERFACE]
+  if not interface or not interface.preview_plan then return end
+  local ok, message = pcall(remote.call, PREVIEW_INTERFACE, "preview_plan", player.index, {
+    command_id = command_id,
+    surface_index = player.surface.index,
+    start_position = PathMath.copy_position(start_position),
+    goal_position = PathMath.copy_position(goal_position),
+    production_path = path,
+    production_status = status
+  })
+  if not ok then log("SCV preview failed: " .. tostring(message)) end
+end
 
 function Planner.request_active(player, state, reason)
   local character = player.character
@@ -189,6 +204,14 @@ local function finish_optimization(player, state, callbacks)
       / optimization.baseline_distance
   })
   callbacks.activate_path(player, state, selected_path)
+  notify_preview(
+    player,
+    optimization.command_id,
+    optimization.start_position,
+    optimization.goal_position,
+    selected_path,
+    "success"
+  )
 end
 
 local function advance_optimization(player, state, callbacks)
@@ -309,7 +332,7 @@ function Planner.handle_result(event, callbacks)
       command_id = request.command_id,
       status = "busy"
     })
-    state.retry_tick = game.tick + 30
+    state.retry_tick = game.tick + Policy.path_request.busy_retry_ticks
     return
   end
   if not event.path then
@@ -318,6 +341,14 @@ function Planner.handle_result(event, callbacks)
       command_id = request.command_id,
       status = "no-path"
     })
+    notify_preview(
+      player,
+      request.command_id,
+      request.start_position or player.position,
+      request.goal_position or state.active.position,
+      nil,
+      "no-path"
+    )
     player.print({"scv-control.no-path"})
     callbacks.finish_active(player, state)
     return
@@ -350,7 +381,7 @@ function Planner.handle_result(event, callbacks)
     path_distance = path_distance,
     direct_distance = direct_distance,
     detour_ratio = detour_ratio,
-    optimization_eligible = detour_ratio > OPTIMIZE_DETOUR_THRESHOLD,
+    optimization_eligible = detour_ratio > Policy.optimization.detour_ratio,
     engine_path = logged_path,
     smoothed_path = baseline_path,
     removed_waypoints = #engine_path - #baseline_path,
@@ -358,7 +389,7 @@ function Planner.handle_result(event, callbacks)
     smoothed_turns = PathMath.turn_metrics(baseline_path)
   })
 
-  if detour_ratio > OPTIMIZE_DETOUR_THRESHOLD
+  if detour_ratio > Policy.optimization.detour_ratio
       and start_optimization(
         player,
         state,
@@ -370,6 +401,14 @@ function Planner.handle_result(event, callbacks)
     return
   end
   callbacks.activate_path(player, state, baseline_path)
+  notify_preview(
+    player,
+    request.command_id,
+    request_start,
+    request_goal,
+    baseline_path,
+    "success"
+  )
 end
 
 return Planner

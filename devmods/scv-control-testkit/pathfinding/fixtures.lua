@@ -1,6 +1,6 @@
 local Fixtures = {}
 
-Fixtures.VERSION = 1
+Fixtures.VERSION = 2
 Fixtures.AREA = {{-64, -32}, {64, 32}}
 
 local definitions = {
@@ -80,6 +80,22 @@ local definitions = {
       {from = {x = 12, y = -4}, to = {x = 12, y = 10}},
       {from = {x = 18, y = -10}, to = {x = 18, y = 4}},
       {from = {x = 24, y = -4}, to = {x = 24, y = 10}}
+    }
+  },
+  {
+    id = "captured-slalom-return",
+    title = "Captured reverse slalom with a late portal switch",
+    category = "captured-regression",
+    bounds = {{5, -15}, {42, 2}},
+    start = {x = 38.2265625, y = -12.65625},
+    goal = {x = 7.70703125, y = -1.51171875},
+    expected_path = true,
+    walls = {
+      {from = {x = 12, y = -9}, to = {x = 12, y = -2}},
+      {from = {x = 18, y = -12}, to = {x = 18, y = -5}},
+      {from = {x = 24, y = -9}, to = {x = 24, y = -2}},
+      {from = {x = 30, y = -12}, to = {x = 30, y = -5}},
+      {from = {x = 36, y = -9}, to = {x = 36, y = -2}}
     }
   },
   {

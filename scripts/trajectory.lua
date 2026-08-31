@@ -1,12 +1,9 @@
 local PathMath = require("scripts.path_math")
+local Policy = require("scripts.navigation_policy")
 
 local Trajectory = {}
 local PRIMITIVE_COUNT = 8
 local TWO_PI = 2 * math.pi
-local MIN_CROSS_TRACK_BAND = 0.15
-local SPEED_BAND_MULTIPLIER = 1.25
-local CLEARANCE_SPEED_MULTIPLIER = 0.5
-local CLEARANCE_PADDING = 0.05
 
 local function primitive_vector(primitive)
   local angle = primitive * TWO_PI / PRIMITIVE_COUNT
@@ -19,20 +16,23 @@ function Trajectory.direction_vector(direction)
 end
 
 function Trajectory.cross_track_band(speed)
-  return math.max(MIN_CROSS_TRACK_BAND, speed * SPEED_BAND_MULTIPLIER)
+  return math.max(
+    Policy.trajectory.min_cross_track_band,
+    speed * Policy.trajectory.speed_band_multiplier
+  )
 end
 
 function Trajectory.clearance_margin(speed)
   return Trajectory.cross_track_band(speed)
-    + speed * CLEARANCE_SPEED_MULTIPLIER
-    + CLEARANCE_PADDING
+    + speed * Policy.trajectory.clearance_speed_multiplier
+    + Policy.trajectory.clearance_padding
 end
 
 local function segment_frame(from, to)
   local dx = to.x - from.x
   local dy = to.y - from.y
   local length = math.sqrt(dx * dx + dy * dy)
-  if length <= 0.000001 then return nil end
+  if length <= Policy.diagnostics.position_epsilon then return nil end
 
   local along = {x = dx / length, y = dy / length}
   local normal = {x = -along.y, y = along.x}
@@ -40,7 +40,7 @@ local function segment_frame(from, to)
   local scaled_direction = orientation * PRIMITIVE_COUNT
   local lower = math.floor(scaled_direction) % PRIMITIVE_COUNT
   local fraction = scaled_direction - math.floor(scaled_direction)
-  local upper = fraction <= 0.000001
+  local upper = fraction <= Policy.diagnostics.position_epsilon
     and lower
     or (lower + 1) % PRIMITIVE_COUNT
   return {
@@ -77,7 +77,7 @@ local function initial_direction(frame, cross_track_error, speed)
   local upper_vector = primitive_vector(frame.upper_primitive)
   local lower_error = math.abs(cross_track_error + speed * dot(lower_vector, frame.normal))
   local upper_error = math.abs(cross_track_error + speed * dot(upper_vector, frame.normal))
-  if math.abs(lower_error - upper_error) <= 0.000001 then
+  if math.abs(lower_error - upper_error) <= Policy.diagnostics.position_epsilon then
     return frame.fraction <= 0.5 and frame.lower_primitive or frame.upper_primitive
   end
   return lower_error < upper_error and frame.lower_primitive or frame.upper_primitive
@@ -110,7 +110,8 @@ function Trajectory.step(position, from, to, speed, trajectory)
   if frame.lower_primitive ~= frame.upper_primitive and not switched then
     local current_vector = primitive_vector(current)
     local predicted_error = cross_track_error + speed * dot(current_vector, frame.normal)
-    local moving_toward_center = math.abs(predicted_error) + 0.000001 < math.abs(cross_track_error)
+    local moving_toward_center = math.abs(predicted_error)
+      + Policy.diagnostics.position_epsilon < math.abs(cross_track_error)
     if math.abs(predicted_error) > band and not moving_toward_center then
       current = current == frame.lower_primitive
         and frame.upper_primitive

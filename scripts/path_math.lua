@@ -1,9 +1,11 @@
+local Policy = require("scripts.navigation_policy")
+
 local PathMath = {}
 
-PathMath.ARRIVAL_DISTANCE = 0.25
-PathMath.MIN_WAYPOINT_DISTANCE = 0.3
-PathMath.SPEED_DISTANCE_MULTIPLIER = 1.5
-PathMath.ALTERNATE_LATERAL_FRACTIONS = {0.5, 0.75}
+PathMath.ARRIVAL_DISTANCE = Policy.path_request.arrival_radius
+PathMath.MIN_WAYPOINT_DISTANCE = Policy.follower.min_waypoint_distance
+PathMath.SPEED_DISTANCE_MULTIPLIER = Policy.follower.speed_distance_multiplier
+PathMath.ALTERNATE_LATERAL_FRACTIONS = Policy.optimization.alternate_lateral_fractions
 
 function PathMath.squared_distance(a, b)
   local dx = a.x - b.x
@@ -31,7 +33,7 @@ end
 
 function PathMath.append_unique_point(points, point)
   local last = points[#points]
-  if not last or PathMath.squared_distance(last, point) > 0.000001 then
+  if not last or PathMath.squared_distance(last, point) > Policy.diagnostics.position_epsilon then
     points[#points + 1] = PathMath.copy_position(point)
   end
 end
@@ -57,7 +59,7 @@ function PathMath.alternate_vias(surface, character_name, start_position, goal_p
   local direct_x = goal_position.x - start_position.x
   local direct_y = goal_position.y - start_position.y
   local direct_length = math.sqrt(direct_x * direct_x + direct_y * direct_y)
-  if direct_length < 1 then
+  if direct_length < Policy.optimization.alternate_min_direct_distance then
     return {}
   end
 
@@ -72,7 +74,7 @@ function PathMath.alternate_vias(surface, character_name, start_position, goal_p
       largest_signed_excursion = signed_excursion
     end
   end
-  if math.abs(largest_signed_excursion) < 2 then
+  if math.abs(largest_signed_excursion) < Policy.optimization.alternate_min_excursion then
     return {}
   end
 
@@ -91,14 +93,16 @@ function PathMath.alternate_vias(surface, character_name, start_position, goal_p
     local position = surface.find_non_colliding_position(
       character_name,
       candidate,
-      2,
-      0.25,
+      Policy.optimization.alternate_snap_radius,
+      Policy.optimization.alternate_snap_precision,
       false
     )
     if position then
       local duplicate = false
       for _, existing in ipairs(vias) do
-        if PathMath.squared_distance(existing.position, position) < 0.25 then
+        local dedup_distance = Policy.optimization.alternate_dedup_distance
+        if PathMath.squared_distance(existing.position, position)
+            < dedup_distance * dedup_distance then
           duplicate = true
           break
         end
@@ -139,7 +143,8 @@ function PathMath.select_shortest_path(baseline_path, baseline_distance, candida
   local selected_distance = baseline_distance
   local selected_candidate_index = nil
   for index, candidate in ipairs(candidates) do
-    if candidate.distance and candidate.distance + 0.01 < selected_distance then
+    if candidate.distance
+        and candidate.distance + Policy.optimization.selection_epsilon < selected_distance then
       selected_path = candidate.path
       selected_distance = candidate.distance
       selected_candidate_index = index
@@ -165,15 +170,18 @@ function PathMath.turn_metrics(points)
     local outgoing_y = following.y - current.y
     local incoming_length = math.sqrt(incoming_x * incoming_x + incoming_y * incoming_y)
     local outgoing_length = math.sqrt(outgoing_x * outgoing_x + outgoing_y * outgoing_y)
-    if incoming_length > 0.000001 and outgoing_length > 0.000001 then
+    if incoming_length > Policy.diagnostics.position_epsilon
+        and outgoing_length > Policy.diagnostics.position_epsilon then
       local cosine = (incoming_x * outgoing_x + incoming_y * outgoing_y)
         / (incoming_length * outgoing_length)
       cosine = math.max(-1, math.min(1, cosine))
       local angle = math.deg(math.acos(cosine))
-      if angle > 1 then
+      if angle > Policy.diagnostics.corner_degrees then
         metrics.corner_count = metrics.corner_count + 1
         metrics.max_turn_degrees = math.max(metrics.max_turn_degrees, angle)
-        if angle > 90 then metrics.reversal_count = metrics.reversal_count + 1 end
+        if angle > Policy.diagnostics.reversal_degrees then
+          metrics.reversal_count = metrics.reversal_count + 1
+        end
         metrics.turns[#metrics.turns + 1] = {
           index = index,
           position = PathMath.copy_position(current),

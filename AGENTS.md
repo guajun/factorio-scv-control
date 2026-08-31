@@ -22,6 +22,7 @@ Use `-Suite smoke` for mod loading and lifecycle checks, `-Suite integration` fo
 - `scripts/path_smoothing.lua` removes collision-safe grid corners and reports exact final paths.
 - `scripts/navigation_grid.lua` captures an inflated local collision snapshot for planner experiments.
 - `scripts/grid_search.lua` owns reusable A*, weighted A*, and Theta* graph search.
+- `scripts/navigation_policy.lua` is the single inventory of production navigation behavior constants.
 - `scripts/trajectory.lua` decomposes continuous segments into hysteresis-controlled native movement primitives.
 - `scripts/follower.lua` advances a LuaControl along an accepted path and is shared with headless tests.
 - `scripts/input.lua` translates cursor data into commands and validates live player input.

@@ -2,10 +2,10 @@ local GridSearch = require("__factorio-scv-control__/scripts/grid_search")
 local NavigationGrid = require("__factorio-scv-control__/scripts/navigation_grid")
 local PathMath = require("__factorio-scv-control__/scripts/path_math")
 local PathSmoothing = require("__factorio-scv-control__/scripts/path_smoothing")
+local Policy = require("__factorio-scv-control__/scripts/navigation_policy")
 
 local Benchmark = {}
-local GRID_RESOLUTION = 0.5
-local OPTIMIZE_DETOUR_THRESHOLD = 2
+Benchmark.GRID_RESOLUTION = Policy.grid.resolution
 
 Benchmark.ALGORITHMS = {
   "engine",
@@ -16,6 +16,13 @@ Benchmark.ALGORITHMS = {
   "grid-theta-star",
   "grid-theta-star-exact"
 }
+
+local function algorithm_selected(state, algorithm)
+  local selection = state.selected_algorithms
+  if selection == nil then return true end
+  if type(selection) == "string" then return selection == algorithm end
+  return selection[algorithm] == true
+end
 
 local function copy_path(path)
   if not path then return nil end
@@ -88,7 +95,7 @@ local function run_grid_algorithm(surface, actor, fixture, grid, algorithm, opti
   return path_result(surface, actor, fixture, algorithm, final_path, metrics)
 end
 
-local function run_selected_grid_algorithms(state, grid, selected_algorithm)
+local function run_selected_grid_algorithms(state, grid)
   local specs = {
     ["grid-a-star"] = {heuristic_weight = 1},
     ["grid-weighted-a-star-2"] = {heuristic_weight = 2},
@@ -101,7 +108,7 @@ local function run_selected_grid_algorithms(state, grid, selected_algorithm)
   }
   for _, algorithm in ipairs(Benchmark.ALGORITHMS) do
     local options = specs[algorithm]
-    if options and (not selected_algorithm or selected_algorithm == algorithm) then
+    if options and algorithm_selected(state, algorithm) then
       state.results[algorithm] = run_grid_algorithm(
         state.surface,
         state.actor,
@@ -163,45 +170,57 @@ local function alternate_fallback(state, optimization_status)
     duration_ticks = game.tick - state.started_tick,
     optimization_status = optimization_status
   }
-  state.results["engine-alternate"] = path_result(
-    state.surface,
-    state.actor,
-    state.fixture,
-    "engine-alternate",
-    engine.path,
-    extra
-  )
-  state.results["engine-alternate-global"] = path_result(
-    state.surface,
-    state.actor,
-    state.fixture,
-    "engine-alternate-global",
-    engine.path,
-    extra
-  )
+  if algorithm_selected(state, "engine-alternate") then
+    state.results["engine-alternate"] = path_result(
+      state.surface,
+      state.actor,
+      state.fixture,
+      "engine-alternate",
+      engine.path,
+      extra
+    )
+  end
+  if algorithm_selected(state, "engine-alternate-global") then
+    state.results["engine-alternate-global"] = path_result(
+      state.surface,
+      state.actor,
+      state.fixture,
+      "engine-alternate-global",
+      engine.path,
+      extra
+    )
+  end
   state.complete = true
 end
 
 local function finish_alternates(state)
   local baseline = state.results.engine
-  local current_path, _, current_index = PathMath.select_shortest_path(
-    baseline.path,
-    baseline.distance,
-    state.alternate.candidates
-  )
-  state.results["engine-alternate"] = path_result(
-    state.surface,
-    state.actor,
-    state.fixture,
-    "engine-alternate",
-    current_path,
-    {
-      request_count = state.engine_request_count,
-      duration_ticks = game.tick - state.started_tick,
-      optimization_status = "evaluated",
-      selected_candidate_index = current_index
-    }
-  )
+  if algorithm_selected(state, "engine-alternate") then
+    local current_path = baseline.path
+    local current_index = nil
+    if state.production_alternate_eligible then
+      current_path, _, current_index = PathMath.select_shortest_path(
+        baseline.path,
+        baseline.distance,
+        state.alternate.candidates
+      )
+    end
+    state.results["engine-alternate"] = path_result(
+      state.surface,
+      state.actor,
+      state.fixture,
+      "engine-alternate",
+      current_path,
+      {
+        request_count = state.engine_request_count,
+        duration_ticks = game.tick - state.started_tick,
+        optimization_status = state.production_alternate_eligible
+          and "evaluated"
+          or "not-eligible",
+        selected_candidate_index = current_index
+      }
+    )
+  end
 
   local global_candidates = {}
   for index, candidate in ipairs(state.alternate.candidates) do
@@ -220,28 +239,30 @@ local function finish_alternates(state)
       global_candidates[index] = {}
     end
   end
-  local global_path, _, global_index = PathMath.select_shortest_path(
-    baseline.path,
-    baseline.distance,
-    global_candidates
-  )
-  state.results["engine-alternate-global"] = path_result(
-    state.surface,
-    state.actor,
-    state.fixture,
-    "engine-alternate-global",
-    global_path,
-    {
-      request_count = state.engine_request_count,
-      duration_ticks = game.tick - state.started_tick,
-      optimization_status = "evaluated-global-smoothing",
-      selected_candidate_index = global_index
-    }
-  )
+  if algorithm_selected(state, "engine-alternate-global") then
+    local global_path, _, global_index = PathMath.select_shortest_path(
+      baseline.path,
+      baseline.distance,
+      global_candidates
+    )
+    state.results["engine-alternate-global"] = path_result(
+      state.surface,
+      state.actor,
+      state.fixture,
+      "engine-alternate-global",
+      global_path,
+      {
+        request_count = state.engine_request_count,
+        duration_ticks = game.tick - state.started_tick,
+        optimization_status = "evaluated-unconditionally-global-smoothing",
+        selected_candidate_index = global_index
+      }
+    )
+  end
   state.complete = true
 end
 
-function Benchmark.start(surface, actor, fixture, selected_algorithm)
+function Benchmark.start(surface, actor, fixture, selected_algorithms)
   local state = {
     surface = surface,
     actor = actor,
@@ -250,19 +271,32 @@ function Benchmark.start(surface, actor, fixture, selected_algorithm)
     requests = {},
     engine_request_count = 0,
     results = {},
-    selected_algorithm = selected_algorithm,
+    selected_algorithms = selected_algorithms,
     complete = false
   }
 
-  if not selected_algorithm or selected_algorithm:find("^grid%-") then
-    local grid = NavigationGrid.capture(surface, actor, fixture.bounds, GRID_RESOLUTION)
-    run_selected_grid_algorithms(state, grid, selected_algorithm)
-    if selected_algorithm then
-      state.complete = true
-      return state
-    end
+  local needs_grid = selected_algorithms == nil
+  for _, algorithm in ipairs(Benchmark.ALGORITHMS) do
+    needs_grid = needs_grid
+      or (algorithm:find("^grid%-") and algorithm_selected(state, algorithm))
+  end
+  if needs_grid then
+    local grid = NavigationGrid.capture(
+      surface,
+      actor,
+      fixture.bounds,
+      fixture.grid_resolution or Benchmark.GRID_RESOLUTION
+    )
+    run_selected_grid_algorithms(state, grid)
   end
 
+  local needs_engine = algorithm_selected(state, "engine")
+    or algorithm_selected(state, "engine-alternate")
+    or algorithm_selected(state, "engine-alternate-global")
+  if not needs_engine then
+    state.complete = true
+    return state
+  end
   request_path(state, "baseline", fixture.start, fixture.goal)
   return state
 end
@@ -326,12 +360,16 @@ function Benchmark.handle_path_result(state, event)
       }
     )
 
-    if state.selected_algorithm == "engine" then
+    local needs_production_alternate = algorithm_selected(state, "engine-alternate")
+    local needs_global_alternate = algorithm_selected(state, "engine-alternate-global")
+    state.production_alternate_eligible = state.results.engine.detour_ratio
+      > Policy.optimization.detour_ratio
+    if not needs_production_alternate and not needs_global_alternate then
       state.complete = true
       return true
     end
 
-    if state.results.engine.detour_ratio <= OPTIMIZE_DETOUR_THRESHOLD then
+    if not state.production_alternate_eligible and not needs_global_alternate then
       alternate_fallback(state, "not-eligible")
       return true
     end

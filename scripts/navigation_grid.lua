@@ -1,5 +1,6 @@
 local PathMath = require("scripts.path_math")
 local PathSmoothing = require("scripts.path_smoothing")
+local Policy = require("scripts.navigation_policy")
 
 local NavigationGrid = {}
 
@@ -60,7 +61,8 @@ function NavigationGrid.capture(surface, character, bounds, resolution)
     self.line_checks = self.line_checks + 1
     local dx = second_ix - first_ix
     local dy = second_iy - first_iy
-    local steps = math.max(math.abs(dx), math.abs(dy)) * 2
+    local steps = math.max(math.abs(dx), math.abs(dy))
+      * Policy.grid.line_samples_per_cell
     local clear = true
     for step = 0, steps do
       local ratio = steps == 0 and 0 or step / steps
