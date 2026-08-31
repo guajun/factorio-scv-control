@@ -41,6 +41,8 @@ The default command runs smoke, engine-backed integration, and pathfinding bench
 
 The next architecture stages, including composable planner profiles, headless navigation episodes, automatic gates, dynamic-world invalidation, and belt-aware travel-time costs, are defined in the [SC2-like navigation architecture plan](docs/navigation-architecture-plan.md).
 
+Navigation profile schemas, registry ownership, capability validation, and storage boundaries are documented in the [navigation extension contract](docs/navigation-extension-contract.md).
+
 Create or refresh the interactive test save with:
 
 ```powershell

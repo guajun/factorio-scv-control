@@ -1,69 +1,119 @@
-local LocalPlanner = require("scripts.local_planner")
 local Logger = require("scripts.planner_logger")
 local PathMath = require("scripts.path_math")
 local PathRender = require("scripts.path_render")
-local PathSmoothing = require("scripts.path_smoothing")
-local Policy = require("scripts.navigation_policy")
+local PlanningRun = require("scripts.navigation.planning_run")
+local ProfileResolver = require("scripts.navigation.profile_resolver")
 local State = require("scripts.state")
 
 local Planner = {}
 local PREVIEW_INTERFACE = "scv_pathfinding_preview"
 
-local function request_engine_path(player, state, kind, start_position, goal_position, reason)
-  local character = player.character
-  local prototype = character.prototype
-  local bounding_box = prototype.collision_box
-  if kind == "inflated-baseline" then
-    bounding_box = PathSmoothing.collision_box(
-      character,
-      PathSmoothing.clearance_margin(character)
-    )
-  end
-  local request_id = player.surface.request_path({
-    bounding_box = bounding_box,
-    collision_mask = prototype.collision_mask,
-    start = start_position,
-    goal = goal_position,
-    force = player.force,
-    radius = PathMath.ARRIVAL_DISTANCE,
-    pathfind_flags = {prefer_straight_paths = true, cache = false},
-    can_open_gates = true,
-    entity_to_ignore = character
-  })
-  state.pending_request = request_id
-  storage.path_requests[request_id] = {
-    kind = kind,
-    player_index = player.index,
-    command_id = state.active.id,
-    start_position = PathMath.copy_position(start_position),
-    goal_position = PathMath.copy_position(goal_position),
-    reason = reason
-  }
-  Logger.write(player, "path-request", {
-    request_id = request_id,
-    request_kind = kind,
-    command_id = state.active.id,
-    reason = reason,
-    start = start_position,
-    goal = goal_position,
-    direct_distance = PathMath.distance(start_position, goal_position),
-    running_speed = player.character_running_speed
-  })
-  return request_id
+local function request_kind(provider_id)
+  if provider_id == "engine-normal" then return "baseline" end
+  if provider_id == "engine-inflated" then return "inflated-baseline" end
+  return provider_id
 end
 
-local function notify_preview(player, command_id, start_position, goal_position, path, status)
+local function notify_preview(player, run, result)
   local interface = remote.interfaces[PREVIEW_INTERFACE]
   if not interface or not interface.preview_plan then return end
   local ok, message = pcall(remote.call, PREVIEW_INTERFACE, "preview_plan", player.index, {
-    command_id = command_id,
+    command_id = run.command_id,
     surface_index = player.surface.index,
-    start_position = PathMath.copy_position(start_position),
-    goal_position = PathMath.copy_position(goal_position),
-    production_path = path,
-    production_status = status
+    start_position = PathMath.copy_position(run.start_position),
+    goal_position = PathMath.copy_position(run.goal_position),
+    production_path = result.route and result.route.points or nil,
+    production_status = result.status,
+    production_provider_order = result.provider_order,
+    production_trace = PlanningRun.provider_trace(run),
+    production_selected_source = result.selected_source
   })
   if not ok then log("SCV preview failed: " .. tostring(message)) end
+end
+
+local function runtime(player, state)
+  return {
+    surface = player.surface,
+    actor = player.character,
+    tick = function() return game.tick end,
+    on_request = function(request_id, pending, run)
+      storage.path_requests[request_id] = {
+        player_index = player.index,
+        command_id = state.active.id,
+        run_id = run.id,
+        provider_id = pending.provider_id,
+        request_ordinal = pending.request_ordinal
+      }
+      Logger.write(player, "path-request", {
+        request_id = request_id,
+        request_kind = request_kind(pending.provider_id),
+        provider_id = pending.provider_id,
+        request_ordinal = pending.request_ordinal,
+        command_id = state.active.id,
+        planning_run_id = run.id,
+        reason = run.reason,
+        start = run.start_position,
+        goal = run.goal_position,
+        direct_distance = PathMath.distance(run.start_position, run.goal_position),
+        running_speed = player.character_running_speed
+      })
+    end,
+    on_trace = function(entry, run)
+      Logger.write(player, "planning-trace", {
+        command_id = run.command_id,
+        planning_run_id = run.id,
+        sequence = entry.sequence,
+        trace_event = entry.event,
+        provider_id = entry.provider_id,
+        component_id = entry.component_id,
+        status = entry.status,
+        reason = entry.reason,
+        request_ordinal = entry.request_ordinal,
+        tick_offset = entry.tick_offset
+      })
+    end
+  }
+end
+
+local function log_terminal(player, run, result)
+  Logger.write(player, "planning-terminal", {
+    command_id = run.command_id,
+    planning_run_id = run.id,
+    status = result.status,
+    reason = result.reason,
+    provider_id = result.provider_id,
+    selected_provider_id = result.selected_provider_id,
+    selected_source = result.selected_source,
+    provider_order = result.provider_order,
+    trace = result.trace,
+    candidates = result.candidates,
+    metrics = result.metrics
+  })
+end
+
+local function handle_terminal(player, state, run, result, callbacks)
+  log_terminal(player, run, result)
+  if result.status == "success" then
+    callbacks.activate_path(player, state, result.route.points)
+    notify_preview(player, run, result)
+    return true
+  end
+  if result.status == "busy-retry" then
+    state.retry_tick = game.tick + result.retry_after_ticks
+    return true
+  end
+  if result.status == "no-path" then
+    notify_preview(player, run, result)
+    player.print({"scv-control.no-path"})
+    callbacks.finish_active(player, state)
+    return true
+  end
+  if result.status == "failed" then
+    player.print({"scv-control.command-unavailable"})
+    callbacks.finish_active(player, state)
+    return true
+  end
+  return false
 end
 
 function Planner.request_active(player, state, reason)
@@ -71,219 +121,93 @@ function Planner.request_active(player, state, reason)
   if not character or not character.valid or not state.active then return false end
   if state.active.surface_index ~= player.surface.index then return false end
 
+  State.ensure_storage()
+  local _, profile_error = ProfileResolver.preflight(storage.navigation_profile)
+  if profile_error then
+    Logger.write(player, "profile-rejected", profile_error)
+    return false, profile_error
+  end
+
+  if state.planning_run and state.planning_run.status == "running" then
+    local cancelled = PlanningRun.cancel(
+      state.planning_run,
+      "superseded",
+      runtime(player, state)
+    )
+    log_terminal(player, state.planning_run, cancelled)
+  end
+
   PathRender.clear(state)
-  local start_position = PathMath.copy_position(character.position)
-  local goal_position = PathMath.copy_position(state.active.position)
-  state.pending_local_comparison = nil
   state.path = nil
   state.retry_tick = nil
-  request_engine_path(
-    player,
-    state,
-    "baseline",
-    start_position,
-    goal_position,
-    reason or "unspecified"
-  )
-  return true
-end
-
-local function finish_local_comparison(player, state, inflated_result, callbacks)
-  local pending = state.pending_local_comparison
-  if not pending then return false end
-  state.pending_local_comparison = nil
-
-  local candidates = {}
-  if inflated_result.path then
-    candidates[1] = {
-      source = "engine-inflated",
-      path = inflated_result.path
-    }
+  state.next_planning_run_id = (state.next_planning_run_id or 0) + 1
+  local run, progress = PlanningRun.start(storage.navigation_profile, {
+    id = state.next_planning_run_id,
+    command_id = state.active.id,
+    adapter_id = "production",
+    start_position = PathMath.copy_position(character.position),
+    goal_position = PathMath.copy_position(state.active.position),
+    reason = reason or "unspecified"
+  }, runtime(player, state))
+  if not run then
+    Logger.write(player, "planning-start-failed", progress)
+    return false, progress
   end
-  local comparison = LocalPlanner.compare(
-    player.surface,
-    player.character,
-    pending.start_position,
-    pending.goal_position,
-    pending.baseline_path,
-    candidates
-  )
-
-  Logger.write(player, "path-local-comparison", {
-    command_id = pending.command_id,
-    selected = comparison.source,
-    selected_distance = comparison.distance,
-    baseline_safe = comparison.baseline_safe,
-    baseline_distance = comparison.baseline_distance,
-    inflated_status = inflated_result.status,
-    inflated_safe = inflated_result.safe,
-    inflated_distance = inflated_result.distance,
-    inflated_path = inflated_result.path,
-    additional_results = comparison.additional_results,
-    grid_safe = comparison.grid_safe,
-    grid_distance = comparison.grid_distance,
-    grid_path = comparison.grid_path,
-    grid_resolution = comparison.grid_resolution,
-    search_bounds = comparison.search_bounds,
-    expanded_nodes = comparison.expanded_nodes,
-    generated_nodes = comparison.generated_nodes,
-    line_checks = comparison.line_checks,
-    sampled_nodes = comparison.sampled_nodes
-  })
-
-  callbacks.activate_path(player, state, comparison.path)
-  notify_preview(
-    player,
-    pending.command_id,
-    pending.start_position,
-    pending.goal_position,
-    comparison.path,
-    "success"
-  )
-  return true
+  state.planning_run = run
+  if progress and progress.status == "pending" then return true end
+  if progress and progress.status == "failed" then
+    log_terminal(player, run, progress)
+    return false, progress
+  end
+  return run.status == "running"
 end
 
 function Planner.handle_result(event, callbacks)
   State.ensure_storage()
   local request = storage.path_requests[event.id]
   storage.path_requests[event.id] = nil
-  if not request then return end
+  if not request then return false end
 
   local player = game.get_player(request.player_index)
   local state = storage.players[request.player_index]
-  if not player or not state or not state.active or state.active.id ~= request.command_id then
+  local run = state and state.planning_run or nil
+  if not player or not state or not state.active
+      or state.active.id ~= request.command_id
+      or not run or run.id ~= request.run_id then
     if player then
-      Logger.write(player, "path-result", {
+      Logger.write(player, "planning-stale-result", {
         request_id = event.id,
         command_id = request.command_id,
+        planning_run_id = request.run_id,
+        provider_id = request.provider_id,
         status = "stale"
       })
     end
-    return
+    return false
   end
 
-  if (request.kind ~= "baseline" and request.kind ~= "inflated-baseline")
-      or state.pending_request ~= event.id then
-    Logger.write(player, "path-result", {
+  local result = PlanningRun.handle_result(run, event, runtime(player, state))
+  if result.status == "pending" then return true end
+  if result.status == "stale" then
+    Logger.write(player, "planning-stale-result", {
       request_id = event.id,
       command_id = request.command_id,
-      status = "stale"
+      planning_run_id = request.run_id,
+      provider_id = request.provider_id,
+      status = "stale",
+      reason = result.reason
     })
-    return
+    return false
   end
+  return handle_terminal(player, state, run, result, callbacks)
+end
 
-  state.pending_request = nil
-  if event.try_again_later and request.kind == "baseline" then
-    Logger.write(player, "path-result", {
-      request_id = event.id,
-      command_id = request.command_id,
-      status = "busy"
-    })
-    state.retry_tick = game.tick + Policy.path_request.busy_retry_ticks
-    return
-  end
-  if not event.path and request.kind == "baseline" then
-    Logger.write(player, "path-result", {
-      request_id = event.id,
-      command_id = request.command_id,
-      status = "no-path"
-    })
-    notify_preview(
-      player,
-      request.command_id,
-      request.start_position,
-      request.goal_position,
-      nil,
-      "no-path"
-    )
-    player.print({"scv-control.no-path"})
-    callbacks.finish_active(player, state)
-    return
-  end
-
-  if request.kind == "inflated-baseline" then
-    local result = {
-      status = event.try_again_later and "busy" or (event.path and "success" or "no-path")
-    }
-    local engine_path
-    local logged_path
-    if event.path then
-      engine_path, logged_path = PathMath.path_from_event(event)
-      result.path = PathSmoothing.simplify(
-        player.surface,
-        player.character,
-        engine_path,
-        request.goal_position
-      )
-      result.distance = PathMath.polyline_distance(request.start_position, result.path)
-      result.safe = PathSmoothing.path_is_clear(
-        player.surface,
-        player.character,
-        request.start_position,
-        result.path
-      )
-    end
-    Logger.write(player, "path-inflated-result", {
-      request_id = event.id,
-      command_id = request.command_id,
-      status = result.status,
-      start = request.start_position,
-      goal = request.goal_position,
-      waypoint_count = event.path and #event.path or nil,
-      engine_path = logged_path,
-      smoothed_path = result.path,
-      path_distance = result.distance,
-      trajectory_clearance_safe = result.safe
-    })
-    finish_local_comparison(player, state, result, callbacks)
-    return
-  end
-
-  local request_start = request.start_position
-  local request_goal = request.goal_position
-  local engine_path, logged_path = PathMath.path_from_event(event)
-  local baseline_path = PathSmoothing.simplify(
-    player.surface,
-    player.character,
-    engine_path,
-    request_goal
-  )
-  local engine_path_distance = PathMath.polyline_distance(request_start, engine_path)
-  local baseline_distance = PathMath.polyline_distance(request_start, baseline_path)
-  local direct_distance = PathMath.distance(request_start, request_goal)
-
-  Logger.write(player, "path-result", {
-    request_id = event.id,
-    command_id = request.command_id,
-    status = "success",
-    reason = request.reason,
-    start = request_start,
-    goal = request_goal,
-    waypoint_count = #event.path,
-    engine_path_distance = engine_path_distance,
-    path_distance = baseline_distance,
-    direct_distance = direct_distance,
-    detour_ratio = direct_distance > 0 and baseline_distance / direct_distance or 1,
-    engine_path = logged_path,
-    smoothed_path = baseline_path,
-    removed_waypoints = #engine_path - #baseline_path,
-    engine_turns = PathMath.turn_metrics(engine_path),
-    smoothed_turns = PathMath.turn_metrics(baseline_path)
-  })
-  state.pending_local_comparison = {
-    command_id = request.command_id,
-    start_position = request_start,
-    goal_position = request_goal,
-    baseline_path = baseline_path
-  }
-  request_engine_path(
-    player,
-    state,
-    "inflated-baseline",
-    request_start,
-    request_goal,
-    request.reason
-  )
+function Planner.cancel(player, state, reason)
+  local run = state and state.planning_run or nil
+  if not run or run.status ~= "running" then return nil end
+  local result = PlanningRun.cancel(run, reason or "cancelled", runtime(player, state))
+  log_terminal(player, run, result)
+  return result
 end
 
 return Planner

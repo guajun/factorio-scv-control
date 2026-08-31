@@ -1,10 +1,13 @@
 local Follower = require("__factorio-scv-control__/scripts/follower")
 local Input = require("__factorio-scv-control__/scripts/input")
-local LocalPlanner = require("__factorio-scv-control__/scripts/local_planner")
+local NavigationContractTests = require("navigation_contract_tests")
 local PathMath = require("__factorio-scv-control__/scripts/path_math")
 local PathSmoothing = require("__factorio-scv-control__/scripts/path_smoothing")
+local PlanningRun = require("__factorio-scv-control__/scripts/navigation/planning_run")
+local Profiles = require("__factorio-scv-control__/scripts/navigation/profiles/init")
 local Queue = require("__factorio-scv-control__/scripts/queue")
 local Trajectory = require("__factorio-scv-control__/scripts/trajectory")
+local WorldTests = require("world_tests")
 
 local START = {x = -28.55078125, y = -0.12109375}
 local GOAL = {x = -30.12109375, y = -9.07421875}
@@ -69,6 +72,33 @@ local function request_path(name, start_position, goal_position, character, expe
   }
 end
 
+local function planning_runtime(suite, name, character)
+  return {
+    surface = game.surfaces[1],
+    actor = character,
+    tick = function() return game.tick end,
+    on_request = function(request_id)
+      suite.planning_requests[request_id] = name
+    end
+  }
+end
+
+local function start_planning_run(name, start_position, goal_position, character)
+  local suite = storage.scv_testkit
+  local run, progress = PlanningRun.start(Profiles.default_reference(), {
+    id = name,
+    adapter_id = "integration",
+    start_position = start_position,
+    goal_position = goal_position,
+    reason = "integration"
+  }, planning_runtime(suite, name, character))
+  suite.planning_runs[name] = run
+  if not run or progress.status ~= "pending" then
+    record(name, false, {status = progress and progress.status or "start-failed"})
+    suite.corridor_done = true
+  end
+end
+
 local function finish_if_complete()
   local suite = storage.scv_testkit
   if suite.finished
@@ -79,7 +109,8 @@ local function finish_if_complete()
       or not suite.queue_done
       or not suite.open_done
       or not suite.trajectory_done
-      or not suite.calibration_done then
+      or not suite.calibration_done
+      or not suite.world_movement_done then
     return
   end
 
@@ -100,7 +131,9 @@ local function finish_if_complete()
   log("SCV_TESTKIT_COMPLETE passed=" .. suite.passed .. " failed=" .. suite.failed)
 end
 
-local function run_unit_tests()
+local function run_unit_tests(surface)
+  NavigationContractTests.run(expect)
+
   expect("path_math.distance", PathMath.distance({x = 0, y = 0}, {x = 3, y = 4}) == 5)
 
   local combined = PathMath.combine_paths(
@@ -124,12 +157,19 @@ local function run_unit_tests()
     and command.surface_index == 4
     and input_state.next_command_id == 8,
     {command = command, next_command_id = input_state.next_command_id})
+
+  for _, result in ipairs(WorldTests.run(surface)) do
+    expect(result.name, result.passed, result.details)
+  end
+  storage.scv_testkit.world_movement_test = WorldTests.start_movement(surface)
 end
 
 script.on_init(function()
   storage.scv_testkit = {
     started_tick = game.tick,
     requests = {},
+    planning_requests = {},
+    planning_runs = {},
     results = {},
     passed = 0,
     failed = 0,
@@ -142,6 +182,7 @@ script.on_init(function()
     open_done = false,
     trajectory_done = false,
     calibration_done = false,
+    world_movement_done = false,
     corridor = {},
     movement_queue = {queue = {}, active = nil, completed = {}},
     trajectory_test = {
@@ -247,11 +288,75 @@ script.on_init(function()
       start = start
     }
   end
-  run_unit_tests()
+  run_unit_tests(surface)
 end)
 
 script.on_event(defines.events.on_script_path_request_finished, function(event)
   local suite = storage.scv_testkit
+  local planning_name = suite.planning_requests[event.id]
+  if planning_name then
+    suite.planning_requests[event.id] = nil
+    local run = suite.planning_runs[planning_name]
+    local result = PlanningRun.handle_result(
+      run,
+      event,
+      planning_runtime(suite, planning_name, suite.path_character)
+    )
+    if result.status == "pending" then return end
+
+    local baseline
+    for _, candidate in ipairs(run.candidates) do
+      if candidate.provider_id == "engine-normal" then baseline = candidate end
+    end
+    local baseline_distance = baseline and baseline.cost_result.value or nil
+    local selected_distance = result.route
+      and PathMath.polyline_distance(START, result.route.points)
+      or nil
+    local trace = PlanningRun.provider_trace(run)
+    expect(
+      "planner.corridor_uses_shared_planning_run",
+      result.status == "success"
+        and result.selected_provider_id == "grid-a-star"
+        and trace[1].provider_id == "engine-normal"
+        and trace[4].provider_id == "engine-inflated"
+        and trace[7].provider_id == "grid-a-star"
+        and trace[#trace].status == "success",
+      {result = result, trace = trace}
+    )
+    expect(
+      "planner.corridor_local_path_is_safe",
+      result.route and PathSmoothing.path_is_clear(
+        game.surfaces[1],
+        suite.path_character,
+        START,
+        result.route.points
+      ),
+      {selected_provider_id = result.selected_provider_id, route = result.route}
+    )
+    expect(
+      "planner.corridor_selects_shorter_side",
+      selected_distance and baseline_distance
+        and selected_distance < baseline_distance * 0.7,
+      {
+        baseline_distance = baseline_distance,
+        selected_distance = selected_distance,
+        selected_path = result.route and result.route.points
+      }
+    )
+    if result.route then
+      suite.corridor.follow_state = {
+        path = result.route.points,
+        waypoint_index = 1,
+        segment_start = PathMath.copy_position(START)
+      }
+      suite.corridor.movement_started_tick = game.tick
+    else
+      suite.corridor_done = true
+    end
+    finish_if_complete()
+    return
+  end
+
   local request = suite.requests[event.id]
   suite.requests[event.id] = nil
   if not request then return end
@@ -310,36 +415,6 @@ script.on_event(defines.events.on_script_path_request_finished, function(event)
     local turn_metrics = PathMath.turn_metrics(path)
     expect("planner.open_path_has_no_reversal", turn_metrics.reversal_count == 0, turn_metrics)
     suite.open_done = true
-  elseif request.name == "corridor-baseline" then
-    suite.corridor.baseline_path = path
-    suite.corridor.baseline_distance = path_distance
-    local comparison = LocalPlanner.compare(
-      game.surfaces[1],
-      suite.path_character,
-      START,
-      GOAL,
-      path
-    )
-    expect("planner.corridor_local_path_is_safe",
-      comparison.grid_safe and comparison.source == "grid-a-star", {
-        source = comparison.source,
-        grid_safe = comparison.grid_safe,
-        grid_path = comparison.grid_path
-      })
-    expect("planner.corridor_selects_shorter_side",
-      comparison.distance < path_distance * 0.7, {
-      baseline_path = path,
-      baseline_distance = path_distance,
-      selected_distance = comparison.distance,
-      selected_path = comparison.path,
-      expanded_nodes = comparison.expanded_nodes
-    })
-    suite.corridor.follow_state = {
-      path = comparison.path,
-      waypoint_index = 1,
-      segment_start = PathMath.copy_position(START)
-    }
-    suite.corridor.movement_started_tick = game.tick
   end
   finish_if_complete()
 end)
@@ -471,6 +546,7 @@ end
 script.on_event(defines.events.on_tick, function(event)
   local suite = storage.scv_testkit
   if suite.finished then return end
+  local surface = game.surfaces[1]
 
   local calibration = suite.motion_calibration
   local elapsed = event.tick - suite.started_tick
@@ -514,10 +590,19 @@ script.on_event(defines.events.on_tick, function(event)
     suite.calibration_done = true
   end
 
+  if not suite.world_movement_done then
+    local result = WorldTests.update_movement(surface, suite.world_movement_test)
+    if result then
+      expect(result.name, result.passed, result.details)
+      suite.world_movement_done = true
+      suite.world_movement_test = nil
+    end
+  end
+
   if not suite.requests_started and event.tick >= suite.started_tick + 60 then
     suite.requests_started = true
     request_path("straight", {x = 0, y = 0}, {x = 20, y = 0}, suite.straight_character)
-    request_path("corridor-baseline", START, GOAL, suite.path_character)
+    start_planning_run("planner.corridor", START, GOAL, suite.path_character)
     request_path("planner.unreachable_reports_no_path", {x = 24, y = 25}, {x = 33, y = 25}, nil, true)
     request_path("planner.open_path_smoothing", OPEN_START, OPEN_GOAL, suite.open_character)
   end
@@ -625,6 +710,9 @@ script.on_event(defines.events.on_tick, function(event)
     if not suite.open_done then record("planner.open_path_smoothing", false, {status = "timeout"}) end
     if not suite.trajectory_done then record("trajectory.vector_decomposition_multi_angle", false, {status = "timeout"}) end
     if not suite.calibration_done then record("trajectory.direction_calibration", false, {status = "timeout"}) end
+    if not suite.world_movement_done then
+      record("navigation_world.live_transients_follow_ordinary_movement", false, {status = "timeout"})
+    end
     suite.follower_done = true
     suite.straight_done = true
     suite.corridor_done = true
@@ -633,6 +721,7 @@ script.on_event(defines.events.on_tick, function(event)
     suite.open_done = true
     suite.trajectory_done = true
     suite.calibration_done = true
+    suite.world_movement_done = true
     finish_if_complete()
   end
 end)
