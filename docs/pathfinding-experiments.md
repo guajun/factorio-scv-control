@@ -4,6 +4,27 @@ New entries go at the top. Keep failed hypotheses and operational mistakes: the 
 
 Each entry should state the question, exact fixture/version, measured result, falsified assumption, and decision. Generated JSON remains the source of exact per-path data; this document records why the result changed the design.
 
+## 2026-08-31 - Tight corridor needs the inflated-engine candidate in production
+
+**Question:** Why did live plans near the `tight` marker increasingly route around the wall columns even though the corridor was physically traversable?
+
+**Fixture version:** 4 captures the logged non-grid-aligned command at local start `(9.9296875, -9.87890625)` and goal `(9.9296875, 9.8671875)`.
+
+**Measured result:**
+
+```text
+normal engine             19.97  trajectory-unsafe
+inflated engine           20.17  trajectory-safe, through corridor
+conservative grid A*      22.14  trajectory-safe, outside detour
+new production-local      20.17  selected engine-inflated
+```
+
+The normal engine centerline was shortest but violated the follower's complete trajectory envelope. The conservative 0.5-tile snapshot correctly remained safe, but its cell inflation erased the usable channel and forced the outside route. Factorio could still plan through the channel when its request bounding box was expanded by the exact trajectory margin.
+
+**Falsified assumption:** Normal engine plus conservative local A* did not span the useful safety/quality frontier. Validating the normal route can reject a corridor that an inflated engine request can represent more precisely than the sampled grid.
+
+**Decision:** Production now requests normal and inflated engine paths sequentially, then compares both with conservative local A*. It selects the shortest trajectory-safe candidate with no detour-ratio trigger. The extra request is an explicit latency/work tradeoff and is recorded by the benchmark. The fixture now asserts that production retains the safe narrow channel rather than silently accepting the grid detour.
+
 ## 2026-08-31 - Same-version reload does not run configuration migration
 
 The first strict-zone migration only rebuilt the test lab from `on_configuration_changed`. `game.reload_mods()` loaded the new control checksums but did not raise that migration path because both development mods still reported version `0.1.0`; the visible map therefore remained unchanged.

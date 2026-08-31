@@ -1,6 +1,6 @@
 # Pathfinding Benchmark
 
-The local TestKit owns a deterministic pathfinding test set shared by headless and interactive runs. Production movement does not use the experimental grid planners.
+The local TestKit owns a deterministic pathfinding test set shared by headless and interactive runs. Production uses the shared `LocalPlanner`; legacy alternate and any-angle variants remain benchmark-only.
 
 ## Run headlessly
 
@@ -18,7 +18,7 @@ The scenario completes only after every engine request and algorithm result reac
 
 ## Test set
 
-Fixture version 3 contains:
+Fixture version 4 contains:
 
 | Fixture | Concern |
 | --- | --- |
@@ -41,7 +41,7 @@ Definitions live in `devmods/scv-control-testkit/pathfinding/fixtures.lua`. Do n
 | Algorithm | Description |
 | --- | --- |
 | `engine` | One Factorio `request_path`, followed by production smoothing. |
-| `production-local` | Current production comparison: validated engine path versus conservative local A* inside a baseline-length ellipse. |
+| `production-local` | Current production comparison: validated normal engine, inflated engine, and conservative local A* paths inside a baseline-length ellipse. |
 | `engine-inflated` | Factorio `request_path` with the subject box expanded by the complete trajectory envelope. |
 | `engine-alternate` | Current sequential 0.50/0.75 via strategy. |
 | `engine-alternate-global` | Evaluates alternate candidates regardless of the production `2x` gate, then applies a full-path collision-safe string pull. |
@@ -64,16 +64,16 @@ The current eleven-fixture run passes all reachability, collision, dynamic-state
 
 | Algorithm | Mean / actor-best | Max / actor-best | Expanded | Snapshot lines | Factorio lines | Requests | Clearance misses |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `engine` | 1.190 | 2.008 | 0 | 0 | 0 | 11 | 6 |
-| `production-local` | 1.031 | 1.087 | 8342 | 33932 | 0 | 11 | 0 |
-| `engine-inflated` | 1.205 | 2.056 | 0 | 0 | 0 | 11 | 0 |
-| `engine-alternate` | 1.026 | 1.085 | 0 | 0 | 0 | 35 | 6 |
-| `engine-alternate-global` | 1.000 | 1.000 | 0 | 0 | 0 | 35 | 6 |
-| `grid-a-star` | 1.041 | 1.101 | 10556 | 41755 | 0 | 0 | 0 |
-| `grid-weighted-a-star-2` | 1.043 | 1.101 | 7514 | 25868 | 0 | 0 | 0 |
-| `grid-theta-star` | 1.050 | 1.121 | 9307 | 48207 | 0 | 0 | 0 |
-| `grid-theta-star-exact` | 1.050 | 1.121 | 9307 | 48207 | 47760 | 0 | 0 |
-| `safe-hybrid` | 1.031 | 1.087 | 8342 | 33932 | 0 | 22 | 0 |
+| `engine` | 1.190 | 2.008 | 0 | 0 | 0 | 11 | 7 |
+| `production-local` | 1.032 | 1.087 | 8310 | 33733 | 0 | 22 | 0 |
+| `engine-inflated` | 1.206 | 2.056 | 0 | 0 | 0 | 11 | 0 |
+| `engine-alternate` | 1.026 | 1.085 | 0 | 0 | 0 | 35 | 7 |
+| `engine-alternate-global` | 1.000 | 1.000 | 0 | 0 | 0 | 35 | 7 |
+| `grid-a-star` | 1.042 | 1.108 | 10556 | 41755 | 0 | 0 | 0 |
+| `grid-weighted-a-star-2` | 1.044 | 1.108 | 7514 | 25868 | 0 | 0 | 0 |
+| `grid-theta-star` | 1.050 | 1.130 | 9307 | 48207 | 0 | 0 | 0 |
+| `grid-theta-star-exact` | 1.050 | 1.130 | 9307 | 48207 | 47760 | 0 | 0 |
+| `safe-hybrid` | 1.032 | 1.087 | 8310 | 33733 | 0 | 22 | 0 |
 
 On `long-wall-return`, the measured lengths are:
 
@@ -102,7 +102,7 @@ The production threshold skips this case because `39.05 / 32.49 = 1.202`, even t
 
 The current production-local planner has no such threshold; it selects the validated 36.68-tile conservative-grid path.
 
-On `tight-clearance-corridor`, conservative grid inflation routes outside the narrow channel (`22.34`), while production-local keeps the fully validated engine corridor (`20.29`).
+On the captured non-grid-aligned `tight-clearance-corridor`, the normal engine route is shortest (`19.97`) but fails trajectory-clearance validation. Conservative grid inflation routes outside (`22.14`); production-local selects the inflated engine's validated corridor (`20.17`).
 
 The experiment establishes four boundaries:
 

@@ -1,6 +1,6 @@
 local Fixtures = {}
 
-Fixtures.VERSION = 3
+Fixtures.VERSION = 4
 Fixtures.AREA = {{-64, -32}, {64, 32}}
 
 local definitions = {
@@ -58,8 +58,8 @@ local definitions = {
     title = "Tight corridor at the trajectory-clearance boundary",
     category = "clearance-boundary",
     bounds = {{6, -12}, {14, 12}},
-    start = {x = 10, y = -10},
-    goal = {x = 10, y = 10},
+    start = {x = 9.9296875, y = -9.87890625},
+    goal = {x = 9.9296875, y = 9.8671875},
     expected_path = true,
     allowed_no_path = {
       ["grid-a-star"] = true,

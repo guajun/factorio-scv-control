@@ -196,18 +196,27 @@ local function record_production_local(state, baseline_path, status)
       nil,
       {
         status = status,
-        request_count = state.request_counts.baseline,
+        request_count = state.request_counts.baseline + state.request_counts.inflated,
         duration_ticks = game.tick - state.started_tick
       }
     )
     return
+  end
+  local additional_candidates = {}
+  local inflated = state.results["engine-inflated"]
+  if inflated and inflated.status == "success" then
+    additional_candidates[1] = {
+      source = "engine-inflated",
+      path = inflated.path
+    }
   end
   local comparison = LocalPlanner.compare(
     state.surface,
     state.actor,
     state.fixture.start,
     state.fixture.goal,
-    baseline_path
+    baseline_path,
+    additional_candidates
   )
   state.results["production-local"] = path_result(
     state.surface,
@@ -216,9 +225,9 @@ local function record_production_local(state, baseline_path, status)
     "production-local",
     comparison.path,
     {
-      request_count = state.request_counts.baseline,
+      request_count = state.request_counts.baseline + state.request_counts.inflated,
       duration_ticks = game.tick - state.started_tick,
-      optimization_status = "engine-vs-conservative-local-grid",
+      optimization_status = "engine-vs-inflated-engine-vs-conservative-local-grid",
       selected_source = comparison.source,
       expanded_nodes = comparison.expanded_nodes,
       generated_nodes = comparison.generated_nodes,
@@ -422,6 +431,7 @@ function Benchmark.start(surface, actor, fixture, selected_algorithms)
     or algorithm_selected(state, "engine-alternate-global")
     or algorithm_selected(state, "safe-hybrid")
   local needs_inflated = algorithm_selected(state, "engine-inflated")
+    or algorithm_selected(state, "production-local")
     or algorithm_selected(state, "safe-hybrid")
   if needs_inflated then
     request_path(state, "inflated-baseline", fixture.start, fixture.goal)

@@ -55,7 +55,14 @@ local function search_bounds(character, start_position, goal_position, baseline_
   }
 end
 
-function LocalPlanner.compare(surface, character, start_position, goal_position, baseline_path)
+function LocalPlanner.compare(
+    surface,
+    character,
+    start_position,
+    goal_position,
+    baseline_path,
+    additional_candidates
+)
   local baseline_distance = PathMath.polyline_distance(start_position, baseline_path)
   local baseline_safe = PathSmoothing.path_is_clear(
     surface,
@@ -88,10 +95,36 @@ function LocalPlanner.compare(surface, character, start_position, goal_position,
   local selected_path = baseline_path
   local selected_source = "engine"
   local selected_distance = baseline_distance
-  if grid_safe and (not baseline_safe or grid_distance < baseline_distance) then
+  local selected_safe = baseline_safe
+  local additional_results = {}
+  for _, candidate in ipairs(additional_candidates or {}) do
+    local safe = candidate.path and PathSmoothing.path_is_clear(
+      surface,
+      character,
+      start_position,
+      candidate.path
+    ) or false
+    local distance = candidate.path
+      and PathMath.polyline_distance(start_position, candidate.path)
+      or nil
+    additional_results[#additional_results + 1] = {
+      source = candidate.source,
+      safe = safe,
+      distance = distance,
+      path = candidate.path
+    }
+    if safe and (not selected_safe or distance < selected_distance) then
+      selected_path = candidate.path
+      selected_source = candidate.source
+      selected_distance = distance
+      selected_safe = true
+    end
+  end
+  if grid_safe and (not selected_safe or grid_distance < selected_distance) then
     selected_path = grid_path
     selected_source = "grid-a-star"
     selected_distance = grid_distance
+    selected_safe = true
   end
 
   return {
@@ -100,6 +133,7 @@ function LocalPlanner.compare(surface, character, start_position, goal_position,
     distance = selected_distance,
     baseline_safe = baseline_safe,
     baseline_distance = baseline_distance,
+    additional_results = additional_results,
     grid_path = grid_path,
     grid_safe = grid_safe,
     grid_distance = grid_distance,

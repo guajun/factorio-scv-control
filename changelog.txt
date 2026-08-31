@@ -23,9 +23,11 @@ Date: 29. 08. 2026
     - Added inflated-engine and heuristic-free safe-hybrid planner experiments.
     - Added a reverse-chronological pathfinding experiment and pitfall log.
     - Replaced production alternate-via optimization with validated engine versus conservative local A* comparison.
+    - Added the validated inflated-engine path to production candidate selection.
   Bugfixes:
     - Fixed fast characters overshooting waypoints and repeatedly replanning around phantom obstacles.
     - Fixed old path renderings overlapping the current plan and appearing as a single detour.
     - Optimized extreme non-minimal paths returned by the engine pathfinder using sequential near and fallback alternate vias.
     - Fixed alternate routes overshooting the nearer end of long obstacles when the fallback via was unnecessarily far away.
     - Removed collision-safe grid zigzags and endpoint reversals from engine paths before following them.
+    - Fixed non-grid-aligned tight-corridor commands taking the conservative grid's outside detour.

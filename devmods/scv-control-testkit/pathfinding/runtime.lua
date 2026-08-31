@@ -584,6 +584,32 @@ local function validate_test_set(suite)
       grid_a_star = slalom_best and slalom_best.distance
     }
   )
+
+  local tight = results_by_id["tight-clearance-corridor"]
+  local tight_production = tight and tight.results["production-local"]
+  local tight_inflated = tight and tight.results["engine-inflated"]
+  local tight_grid = tight and tight.results["grid-a-star"]
+  add_assertion(
+    suite,
+    "benchmark.tight-corridor-preserves-safe-channel",
+    tight_production
+      and tight_inflated
+      and tight_production.status == "success"
+      and tight_inflated.status == "success"
+      and tight_production.trajectory_clearance_safe
+      and tight_production.selected_source == "engine-inflated"
+      and tight_production.distance <= tight_inflated.distance + 0.05
+      and tight_grid
+      and (tight_grid.status == "no-path"
+        or tight_production.distance < tight_grid.distance - 1),
+    {
+      production_source = tight_production and tight_production.selected_source,
+      production_distance = tight_production and tight_production.distance,
+      inflated_distance = tight_inflated and tight_inflated.distance,
+      grid_status = tight_grid and tight_grid.status,
+      grid_distance = tight_grid and tight_grid.distance
+    }
+  )
 end
 
 local function finish_headless(suite)

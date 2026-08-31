@@ -26,6 +26,7 @@ local function clear_active(state)
   state.recovery_waypoint_index = nil
   state.recovery_attempts = 0
   state.pending_request = nil
+  state.pending_local_comparison = nil
   state.stuck_retries = 0
   state.last_position = nil
   state.retry_tick = nil
@@ -39,6 +40,7 @@ end
 
 local function activate_path(player, state, path)
   state.pending_request = nil
+  state.pending_local_comparison = nil
   state.path = path
   state.waypoint_index = 1
   state.segment_start = PathMath.copy_position(player.position)
