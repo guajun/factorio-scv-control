@@ -6,6 +6,7 @@ local PathMath = require("__factorio-scv-control__/scripts/path_math")
 local PathSmoothing = require("__factorio-scv-control__/scripts/path_smoothing")
 local Queue = require("__factorio-scv-control__/scripts/queue")
 local Trajectory = require("__factorio-scv-control__/scripts/trajectory")
+local WorldTests = require("world_tests")
 
 local START = {x = -28.55078125, y = -0.12109375}
 local GOAL = {x = -30.12109375, y = -9.07421875}
@@ -101,7 +102,7 @@ local function finish_if_complete()
   log("SCV_TESTKIT_COMPLETE passed=" .. suite.passed .. " failed=" .. suite.failed)
 end
 
-local function run_unit_tests()
+local function run_unit_tests(surface)
   NavigationContractTests.run(expect)
 
   expect("path_math.distance", PathMath.distance({x = 0, y = 0}, {x = 3, y = 4}) == 5)
@@ -127,6 +128,10 @@ local function run_unit_tests()
     and command.surface_index == 4
     and input_state.next_command_id == 8,
     {command = command, next_command_id = input_state.next_command_id})
+
+  for _, result in ipairs(WorldTests.run(surface)) do
+    expect(result.name, result.passed, result.details)
+  end
 end
 
 script.on_init(function()
@@ -250,7 +255,7 @@ script.on_init(function()
       start = start
     }
   end
-  run_unit_tests()
+  run_unit_tests(surface)
 end)
 
 script.on_event(defines.events.on_script_path_request_finished, function(event)
