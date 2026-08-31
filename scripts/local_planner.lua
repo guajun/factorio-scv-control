@@ -63,20 +63,19 @@ function LocalPlanner.compare(
     baseline_path,
     additional_candidates
 )
+  local raw_path, metrics, bounds = LocalPlanner.search(
+    surface,
+    character,
+    start_position,
+    goal_position,
+    baseline_path
+  )
   local baseline_distance = PathMath.polyline_distance(start_position, baseline_path)
   local baseline_safe = PathSmoothing.path_is_clear(
     surface,
     character,
     start_position,
     baseline_path
-  )
-  local bounds = search_bounds(character, start_position, goal_position, baseline_distance)
-  local grid = NavigationGrid.capture(surface, character, bounds.area, bounds.resolution)
-  local raw_path, metrics = GridSearch.search(
-    grid,
-    start_position,
-    goal_position,
-    {heuristic_weight = 1}
   )
   local grid_path = raw_path and PathSmoothing.simplify(
     surface,
@@ -144,6 +143,27 @@ function LocalPlanner.compare(
     line_checks = metrics.line_checks,
     sampled_nodes = metrics.sampled_nodes
   }
+end
+
+function LocalPlanner.search(
+    surface,
+    character,
+    start_position,
+    goal_position,
+    baseline_path
+)
+  local baseline_distance = PathMath.polyline_distance(start_position, baseline_path)
+  local bounds = search_bounds(character, start_position, goal_position, baseline_distance)
+  local grid = NavigationGrid.capture(surface, character, bounds.area, bounds.resolution)
+  local raw_path, metrics = GridSearch.search(
+    grid,
+    start_position,
+    goal_position,
+    {heuristic_weight = 1}
+  )
+  metrics.grid_resolution = bounds.resolution
+  metrics.search_bounds = bounds.area
+  return raw_path, metrics, bounds
 end
 
 return LocalPlanner

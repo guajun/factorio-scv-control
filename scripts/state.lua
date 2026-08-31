@@ -13,6 +13,7 @@ function State.get(player_index)
   local state = storage.players[player_index]
   if state then
     state.path_renderings = state.path_renderings or {}
+    state.next_planning_run_id = state.next_planning_run_id or 0
     return state
   end
 
@@ -26,8 +27,8 @@ function State.get(player_index)
     trajectory = nil,
     recovery_waypoint_index = nil,
     recovery_attempts = 0,
-    pending_request = nil,
-    pending_local_comparison = nil,
+    planning_run = nil,
+    next_planning_run_id = 0,
     next_command_id = 1,
     stuck_retries = 0,
     last_position = nil,
