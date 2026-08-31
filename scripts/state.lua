@@ -1,8 +1,11 @@
+local Profiles = require("scripts.navigation.profiles.init")
+
 local State = {}
 
 function State.ensure_storage()
   storage.players = storage.players or {}
   storage.path_requests = storage.path_requests or {}
+  storage.navigation_profile = storage.navigation_profile or Profiles.default_reference()
 end
 
 function State.get(player_index)

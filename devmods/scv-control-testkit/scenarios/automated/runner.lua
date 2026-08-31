@@ -1,6 +1,7 @@
 local Follower = require("__factorio-scv-control__/scripts/follower")
 local Input = require("__factorio-scv-control__/scripts/input")
 local LocalPlanner = require("__factorio-scv-control__/scripts/local_planner")
+local NavigationContractTests = require("navigation_contract_tests")
 local PathMath = require("__factorio-scv-control__/scripts/path_math")
 local PathSmoothing = require("__factorio-scv-control__/scripts/path_smoothing")
 local Queue = require("__factorio-scv-control__/scripts/queue")
@@ -101,6 +102,8 @@ local function finish_if_complete()
 end
 
 local function run_unit_tests()
+  NavigationContractTests.run(expect)
+
   expect("path_math.distance", PathMath.distance({x = 0, y = 0}, {x = 3, y = 4}) == 5)
 
   local combined = PathMath.combine_paths(

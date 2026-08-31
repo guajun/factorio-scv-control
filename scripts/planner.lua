@@ -4,6 +4,7 @@ local PathMath = require("scripts.path_math")
 local PathRender = require("scripts.path_render")
 local PathSmoothing = require("scripts.path_smoothing")
 local Policy = require("scripts.navigation_policy")
+local ProfileResolver = require("scripts.navigation.profile_resolver")
 local State = require("scripts.state")
 
 local Planner = {}
@@ -70,6 +71,13 @@ function Planner.request_active(player, state, reason)
   local character = player.character
   if not character or not character.valid or not state.active then return false end
   if state.active.surface_index ~= player.surface.index then return false end
+
+  State.ensure_storage()
+  local _, profile_error = ProfileResolver.preflight(storage.navigation_profile)
+  if profile_error then
+    Logger.write(player, "profile-rejected", profile_error)
+    return false, profile_error
+  end
 
   PathRender.clear(state)
   local start_position = PathMath.copy_position(character.position)
