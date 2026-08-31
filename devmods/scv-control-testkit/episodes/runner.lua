@@ -1,4 +1,5 @@
 local Contracts = require("episodes.contracts")
+local NavigationContracts = require("__factorio-scv-control__/scripts/navigation/contracts")
 local Util = require("episodes.util")
 
 local Runner = {}
@@ -17,11 +18,12 @@ local function record(run, tick, event_type, details)
 end
 
 local function context_for(run, fixture, services, tick)
+  local actor = run.navigation.actor
   return {
     run = run,
     fixture = fixture,
-    actor = run.navigation.actor,
-    surface = run.navigation.actor.surface,
+    actor = actor,
+    surface = actor and actor.valid and actor.surface or nil,
     tick = tick,
     record = function(event_type, details)
       record(run, tick, event_type, details)
@@ -36,6 +38,8 @@ local function create_metrics()
   return {
     profile_id = false,
     source = false,
+    selected_provider_id = false,
+    provider_order = {},
     predicted_travel_ticks = false,
     last_predicted_travel_ticks = false,
     actual_travel_ticks = false,
@@ -56,7 +60,19 @@ local function create_metrics()
     route_predictions = {},
     work = {
       setup = {ticks = 0},
-      planning = {requests = 0, results = 0, busy_results = 0, ticks = 0},
+      planning = {
+        runs = 0,
+        requests = 0,
+        results = 0,
+        ticks = 0,
+        run_ticks = 0,
+        provider_starts = 0,
+        provider_results = 0,
+        postprocessors = 0,
+        validators = 0,
+        cost_scores = 0,
+        selections = 0
+      },
       following = {ticks = 0},
       predicates = {evaluations = 0},
       actions = {executed = 0},
@@ -157,6 +173,23 @@ local function finalize(run, fixture, services, tick, terminal_state, terminal_r
     position = final_position
   })
 
+  local navigation_terminal = {
+    schema_version = NavigationContracts.VERSION,
+    status = terminal_state,
+    reason = terminal_reason or terminal_state,
+    metrics = {
+      schema_version = NavigationContracts.VERSION,
+      values = run.metrics
+    }
+  }
+  if run.navigation.route then navigation_terminal.route = run.navigation.route end
+  local terminal_valid, terminal_error = NavigationContracts.validate(
+    "terminal_result",
+    navigation_terminal
+  )
+  local terminal_contract_error = false
+  if not terminal_valid then terminal_contract_error = terminal_error end
+
   local result = {
     id = fixture.id,
     title = fixture.title,
@@ -173,15 +206,22 @@ local function finalize(run, fixture, services, tick, terminal_state, terminal_r
     final_position = final_position,
     profile_id = run.metrics.profile_id,
     source = run.metrics.source,
+    selected_provider_id = run.metrics.selected_provider_id,
+    provider_order = run.metrics.provider_order,
     metrics = run.metrics,
     actions = run.actions,
     assertions = {},
-    last_route = Util.copy_path(run.navigation.route),
+    navigation_terminal = navigation_terminal,
+    terminal_contract_error = terminal_contract_error,
+    planning_runs = run.navigation.planning_results or {},
+    last_route = run.navigation.route or false,
+    last_path = run.navigation.route and Util.copy_path(run.navigation.route.points) or {},
     last_position = final_position,
     last_action = run.actions[#run.actions] or false,
     navigation_state = run.navigation.state,
     trace = run.trace
   }
+  if not terminal_valid then result.passed = false end
   for _, specification in ipairs(fixture.assertions) do
     local assertion = services.assertions.evaluate(
       specification,

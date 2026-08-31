@@ -1,6 +1,8 @@
+local NavigationContracts = require("__factorio-scv-control__/scripts/navigation/contracts")
+
 local Contracts = {}
 
-Contracts.SCHEMA_VERSION = 1
+Contracts.SCHEMA_VERSION = NavigationContracts.VERSION
 Contracts.FIXTURE_VERSION = 1
 Contracts.REPORT_PATH = "scv-control/navigation-episodes.json"
 Contracts.COMPLETE_MARKER = "SCV_EPISODES_COMPLETE"
@@ -93,6 +95,12 @@ function Contracts.validate_report(report)
       require_field(errors, episode.actions, prefix .. ".actions", "table")
       require_field(errors, episode.assertions, prefix .. ".assertions", "table")
       require_field(errors, episode.trace, prefix .. ".trace", "table")
+      require_field(
+        errors,
+        episode.navigation_terminal,
+        prefix .. ".navigation_terminal",
+        "table"
+      )
       if episode.terminal_state
           and not Contracts.TERMINAL_STATES[episode.terminal_state] then
         errors[#errors + 1] = prefix .. ".terminal_state is not terminal"
@@ -100,6 +108,26 @@ function Contracts.validate_report(report)
       if episode.last_position == nil or episode.last_route == nil
           or episode.last_action == nil or episode.navigation_state == nil then
         errors[#errors + 1] = prefix .. " is missing terminal diagnostics"
+      end
+      if type(episode.navigation_terminal) == "table" then
+        local valid, validation_error = NavigationContracts.validate(
+          "terminal_result",
+          episode.navigation_terminal
+        )
+        if not valid then
+          errors[#errors + 1] = prefix .. ".navigation_terminal: "
+            .. validation_error.message .. " at " .. validation_error.path
+        end
+      end
+      if type(episode.last_route) == "table" then
+        local valid, validation_error = NavigationContracts.validate(
+          "route",
+          episode.last_route
+        )
+        if not valid then
+          errors[#errors + 1] = prefix .. ".last_route: "
+            .. validation_error.message .. " at " .. validation_error.path
+        end
       end
     end
   end

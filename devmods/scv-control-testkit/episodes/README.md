@@ -33,15 +33,14 @@ adapter.update(run, fixture, context)
 adapter.stop(run)
 ```
 
-The included `episode-engine-follower-v1` adapter is an executable baseline over Factorio's engine
-path request plus the production `PathSmoothing`, `Follower`, and navigation policy modules. Once
-the shared `PlanningRun` and `NavigationSession` contracts land, integration replaces this adapter;
-the fixture, runner, action, assertion, trace, and report contracts remain unchanged.
+The included `planning-run-follower-v1` adapter executes the shared `production-v1` `PlanningRun`,
+then advances the accepted shared route through the production `Follower` and navigation policy.
+Each episode report embeds the versioned shared route and `terminal_result` contracts as well as the
+provider order and trace for every planning run.
 
 ## Integration wiring
 
-The standalone scenario is `scv-control-testkit/navigation-episodes`. The integration owner adds an
-`episodes` suite to `tools/test.ps1`, launches that scenario with the existing hidden headless server
-helper, waits for `SCV_EPISODES_COMPLETE`, validates
-`script-output/scv-control/navigation-episodes.json`, and includes it after the benchmark in `all`.
-Failed roots remain preserved by the existing test-runner policy.
+The standalone scenario is `scv-control-testkit/navigation-episodes`. `tools/test.ps1 -Suite
+episodes` launches it through a hidden headless server, waits for `SCV_EPISODES_COMPLETE`, and
+validates `script-output/scv-control/navigation-episodes.json`. The `all` suite runs episodes after
+the planning benchmark. Failed roots remain preserved by the existing test-runner policy.

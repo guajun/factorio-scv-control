@@ -10,6 +10,13 @@ handlers["terminal-state-is"] = function(spec, result)
   }
 end
 
+handlers["terminal-reason-is"] = function(spec, result)
+  return result.terminal_reason == spec.expected, {
+    actual = result.terminal_reason,
+    expected = spec.expected
+  }
+end
+
 handlers["metric-at-least"] = function(spec, result)
   local actual = Util.value_at_path(result.metrics, spec.path)
   return type(actual) == "number" and actual >= spec.value, {

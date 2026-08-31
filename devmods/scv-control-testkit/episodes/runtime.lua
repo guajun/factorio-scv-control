@@ -1,5 +1,5 @@
 local Actions = require("episodes.actions")
-local Adapter = require("episodes.adapters.engine_follower")
+local Adapter = require("episodes.adapters.planning_run_follower")
 local Assertions = require("episodes.assertions")
 local Catalog = require("episodes.catalog")
 local Contracts = require("episodes.contracts")

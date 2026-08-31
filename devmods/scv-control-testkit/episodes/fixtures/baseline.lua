@@ -67,10 +67,15 @@ Baseline.fixtures = {
         }
       }
     },
-    expected_terminal = "arrived",
+    expected_terminal = "failed",
     timeout_ticks = 1800,
     assertions = {
-      terminal_assertion("arrived"),
+      terminal_assertion("failed"),
+      {
+        id = "terminal-reason",
+        type = "terminal-reason-is",
+        expected = "no-safe-candidate"
+      },
       {id = "wall-created", type = "action-executed", action_id = "insert-blocking-wall"},
       {id = "stuck-observed", type = "metric-at-least", path = "stuck_count", value = 1},
       {id = "replan-observed", type = "metric-at-least", path = "replan_count", value = 1},
