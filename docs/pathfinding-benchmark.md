@@ -30,8 +30,8 @@ Fixture version 4 contains:
 | `u-trap` | A cul-de-sac that initially points away from the goal. |
 | `slalom` | Multiple alternating topology decisions. |
 | `captured-slalom-return` | Exact normal-click regression where the engine switches from the north route to a late south portal. |
-| `gate-open` | Dynamic-static snapshot before a gate closes. |
-| `gate-closed` | Same world after the blocking wall is inserted. |
+| `gate-open` | Historical name for a dynamic wall with a static gap; it does not contain a Factorio gate entity. |
+| `gate-closed` | Historical name for the same geometry after the gap is filled with a stone wall. |
 | `unreachable-box` | Complete enclosure and no-path termination. |
 
 Definitions live in `devmods/scv-control-testkit/pathfinding/fixtures.lua`. Do not recreate these geometries in another runner.

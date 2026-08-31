@@ -42,6 +42,8 @@ The pathfinding benchmark writes `script-output/scv-control/pathfinding-benchmar
 
 Record pathfinding experiments in `docs/pathfinding-experiments.md` with newest entries at the top. Preserve failed hypotheses, exact fixtures/metrics, and the decision they motivated; do not rewrite the log into a success-only narrative.
 
+Before implementing composable planners, dynamic-world handling, gates, belts, or navigation episodes, read `docs/navigation-architecture-plan.md`. Phase 0 in that plan is the merge barrier: production and evaluation must share `PlanningRun` contracts before domain features branch out. During parallel work, assign `control.lua`, `tools/test.ps1`, registry indexes, the default profile, common report schemas, and this file to one integration owner; specialist agents should add isolated modules and domain fixture files without editing those central hot files.
+
 Every regression fix should add or tighten an assertion in the automated scenario. Prefer exact fixture coordinates and bounded metrics over screenshots.
 
 ## Interactive test save

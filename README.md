@@ -39,6 +39,8 @@ pwsh -File .\tools\test.ps1
 
 The default command runs smoke, engine-backed integration, and pathfinding benchmark suites in an isolated temporary directory. It validates loading, path optimization, completed character movement, completed command queues, cursor-to-command translation, unreachable targets, and comparative planner behavior. Suites exit on terminal assertions; fixed ticks are used only as failure timeouts. See [testing](docs/testing.md), [pathfinding benchmark](docs/pathfinding-benchmark.md), and [trajectory planning](docs/trajectory.md).
 
+The next architecture stages, including composable planner profiles, headless navigation episodes, automatic gates, dynamic-world invalidation, and belt-aware travel-time costs, are defined in the [SC2-like navigation architecture plan](docs/navigation-architecture-plan.md).
+
 Create or refresh the interactive test save with:
 
 ```powershell

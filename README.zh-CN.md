@@ -39,6 +39,8 @@ pwsh -File .\tools\test.ps1
 
 默认命令会在隔离临时目录运行 smoke、真实引擎 integration 和寻路 benchmark 套件，验证加载、路径优化、角色实际到达、队列实际执行完成、光标到指令的转换、不可达目标和多种规划器的对比行为。各套件会等待任务进入终态；固定 tick 只作为失败超时。详见 [测试](docs/testing.md)、[寻路基准](docs/pathfinding-benchmark.md) 与 [轨迹规划](docs/trajectory.md)。
 
+下一阶段的组合式 planner profile、无头导航 episode、自动闸门、动态世界失效以及传送带时间成本，统一记录在 [SC2-like 导航架构计划](docs/navigation-architecture-plan.md)。
+
 创建或刷新交互测试存档：
 
 ```powershell
