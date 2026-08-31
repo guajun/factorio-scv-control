@@ -5,8 +5,14 @@ local PathMath = require("scripts.path_math")
 local PathRender = require("scripts.path_render")
 local Planner = require("scripts.planner")
 local Policy = require("scripts.navigation_policy")
+local ProfileResolver = require("scripts.navigation.profile_resolver")
 local Queue = require("scripts.queue")
 local State = require("scripts.state")
+
+local implementations_loaded, implementation_error = ProfileResolver.load_implementations()
+if not implementations_loaded then
+  error(implementation_error.message .. " " .. tostring(implementation_error.cause))
+end
 
 local start_next_command
 
