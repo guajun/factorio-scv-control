@@ -45,6 +45,8 @@ local function zero_metrics()
     entities_rescanned = 0,
     revision_changes = zero_revisions(),
     reconstructions = 0,
+    transient_observation_queries = 0,
+    transient_entities_observed = 0,
     full_surface_rescans = 0
   }
 end
@@ -83,6 +85,16 @@ local function validate_state(state)
   state.surfaces = state.surfaces or {}
   state.metrics = state.metrics or zero_metrics()
   ensure_metric_shape(state.metrics)
+  for _, surface_state in pairs(state.surfaces) do
+    for _, region in pairs(surface_state.regions or {}) do
+      for key, entity in pairs(region.entities or {}) do
+        if entity.transient and not entity.topology
+            and not entity.motion and not entity.transition then
+          region.entities[key] = nil
+        end
+      end
+    end
+  end
 end
 
 function NavigationWorld.new(state, runtime)
@@ -366,10 +378,9 @@ function World:handle_event(event_name, event)
   return report
 end
 
-local function relevant_entity(classification)
+local function persistent_entity(classification)
   return classification.topology
     or classification.motion
-    or classification.transient
     or classification.transition
 end
 
@@ -392,9 +403,10 @@ local function entity_snapshot(classification)
   })
 end
 
-local function tile_snapshot(classification)
+local function tile_snapshot(classification, position)
   return copy_basic({
     name = classification.name,
+    position = position,
     blocking = classification.blocking,
     walking_speed_modifier = classification.walking_speed_modifier,
     motion = classification.motion
@@ -414,7 +426,7 @@ function World:_refresh_region(surface_state, region)
   local found_entities = surface.find_entities_filtered({area = bounds})
   for _, entity in ipairs(found_entities) do
     local classification = self:_classify_entity(entity)
-    if classification and relevant_entity(classification)
+    if classification and persistent_entity(classification)
         and not removed_entities[classification.key] then
       entities[classification.key] = entity_snapshot(classification)
     end
@@ -430,7 +442,8 @@ function World:_refresh_region(surface_state, region)
     for y = min_y, max_y do
       local tile = surface.get_tile(x, y)
       tiles[x .. "," .. y] = tile_snapshot(
-        self:_classify_tile_prototype(tile.prototype)
+        self:_classify_tile_prototype(tile.prototype),
+        {x = x, y = y}
       )
       cells_rescanned = cells_rescanned + 1
     end
@@ -454,10 +467,28 @@ function World:_region_for_position(surface_index, position, refresh)
   local rx, ry = Geometry.region_coordinates(position, self._state.config.region_size)
   local region = self:_region(surface_state, rx, ry)
   if refresh and (not region.scanned
-      or region.dirty.topology or region.dirty.motion or region.dirty.transient) then
+      or region.dirty.topology or region.dirty.motion) then
     self:_refresh_region(surface_state, region)
   end
   return surface_state, region
+end
+
+function World:_regions_for_bounds(surface_index, bounds, refresh)
+  local surface_state = self:_surface_state(surface_index)
+  local regions = {}
+  for _, coordinates in ipairs(Geometry.regions_for_bounds(
+    bounds,
+    self._state.config.region_size
+  )) do
+    local region = self:_region(surface_state, coordinates.rx, coordinates.ry)
+    if refresh and (not region.scanned
+        or region.dirty.topology or region.dirty.motion) then
+      self:_refresh_region(surface_state, region)
+    end
+    regions[#regions + 1] = region
+  end
+  sorted_values_by_key(regions)
+  return surface_state, regions
 end
 
 local function ignore_entity(entity, options)
@@ -466,28 +497,70 @@ local function ignore_entity(entity, options)
 end
 
 function World:query(surface_index, position, options)
+  options = options or {}
   position = Geometry.position(position)
-  local surface_state, region = self:_region_for_position(surface_index, position, true)
+  local actor_collision_box = options.actor_collision_box
+    or self._runtime.actor_collision_box
+  assert(actor_collision_box,
+    "NavigationWorld query requires an actor_collision_box")
+  local actor_bounds = Geometry.place_bounds(position, actor_collision_box)
+  local surface_state, regions = self:_regions_for_bounds(
+    surface_index,
+    actor_bounds,
+    true
+  )
+  local center_rx, center_ry = Geometry.region_coordinates(
+    position,
+    self._state.config.region_size
+  )
+  local center_key = Geometry.region_key(center_rx, center_ry)
+  local center_region
+  for _, region in ipairs(regions) do
+    if region.key == center_key then center_region = region end
+  end
+  assert(center_region, "NavigationWorld query did not resolve its center region")
   local tile_key = math.floor(position.x) .. "," .. math.floor(position.y)
-  local tile = region.tiles[tile_key]
+  local tile = center_region.tiles[tile_key]
   local occupancy = {}
   local transitions = {}
   local motion = {}
-  local dependencies = {{
-    kind = "navigation-region",
-    surface_index = surface_index,
-    region_key = region.key,
-    revisions = copy_basic(region.revisions)
-  }}
-  local traversable = not (tile and tile.blocking)
+  local dependencies = {}
+  local region_revisions = {}
+  local entities_by_key = {}
+  local traversable = true
 
   if tile and tile.motion then
     motion[#motion + 1] = copy_basic(tile.motion)
   end
-  for _, entity in pairs(region.entities) do
-    if Geometry.contains(entity.bounds, position) and not ignore_entity(entity, options) then
-      occupancy[#occupancy + 1] = copy_basic(entity)
+  for _, region in ipairs(regions) do
+    dependencies[#dependencies + 1] = {
+      kind = "navigation-region",
+      surface_index = surface_index,
+      region_key = region.key,
+      revisions = copy_basic(region.revisions)
+    }
+    region_revisions[#region_revisions + 1] = {
+      key = region.key,
+      revisions = copy_basic(region.revisions)
+    }
+    for _, candidate_tile in pairs(region.tiles) do
+      if candidate_tile.blocking and Geometry.intersects(
+        Geometry.tile_bounds(candidate_tile.position),
+        actor_bounds
+      ) then
+        traversable = false
+      end
     end
+    for key, entity in pairs(region.entities) do
+      if not entities_by_key[key]
+          and Geometry.intersects(entity.bounds, actor_bounds)
+          and not ignore_entity(entity, options) then
+        entities_by_key[key] = entity
+      end
+    end
+  end
+  for _, entity in pairs(entities_by_key) do
+    occupancy[#occupancy + 1] = copy_basic(entity)
   end
   table.sort(occupancy, function(first, second) return first.key < second.key end)
   for _, entity in ipairs(occupancy) do
@@ -498,12 +571,16 @@ function World:query(surface_index, position, options)
     elseif entity.blocking then
       traversable = false
     end
-    if entity.motion then motion[#motion + 1] = copy_basic(entity.motion) end
+    if entity.motion and Geometry.contains(entity.bounds, position) then
+      motion[#motion + 1] = copy_basic(entity.motion)
+    end
   end
 
   return {
     surface_index = surface_index,
     position = position,
+    actor_bounds = actor_bounds,
+    traversability_kind = "actor-footprint",
     traversable = traversable,
     occupancy = occupancy,
     transitions = transitions,
@@ -512,7 +589,8 @@ function World:query(surface_index, position, options)
     dependencies = dependencies,
     revisions = {
       surface = copy_basic(surface_state.revisions),
-      region = copy_basic(region.revisions)
+      region = copy_basic(center_region.revisions),
+      regions = region_revisions
     }
   }
 end
@@ -527,6 +605,33 @@ end
 
 function World:conditional_transitions(surface_index, position, options)
   return self:query(surface_index, position, options).transitions
+end
+
+function World:observe_transients(surface_index, bounds, options)
+  options = options or {}
+  bounds = Geometry.copy_bounds(bounds)
+  local surface = self:_surface(surface_index)
+  assert(surface and surface.valid ~= false,
+    "NavigationWorld transient observation surface is unavailable")
+  local entities = {}
+  for _, entity in ipairs(surface.find_entities_filtered({area = bounds})) do
+    local classification = self:_classify_entity(entity)
+    if classification and classification.transient
+        and not ignore_entity(classification, options) then
+      entities[#entities + 1] = entity_snapshot(classification)
+    end
+  end
+  table.sort(entities, function(first, second) return first.key < second.key end)
+  self._state.metrics.transient_observation_queries =
+    self._state.metrics.transient_observation_queries + 1
+  self._state.metrics.transient_entities_observed =
+    self._state.metrics.transient_entities_observed + #entities
+  return {
+    surface_index = surface_index,
+    bounds = bounds,
+    entities = entities,
+    revisions = self:revision_snapshot(surface_index, bounds)
+  }
 end
 
 function World:directed_motion(surface_index, from, to, options)

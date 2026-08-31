@@ -45,13 +45,17 @@ local function entity_mutation(spec, event, context)
   local entity = event[spec.field]
   local classification = context.classify_entity(entity)
   if not classification then return {} end
+  local categories = Classification.categories(classification)
   return {{
     surface_index = entity.surface.index,
     bounds = entity_bounds(entity, spec.action),
-    categories = Classification.categories(classification),
+    categories = categories,
     source = spec.name,
     entity = classification.dependency,
-    remove_entity_key = spec.action == "remove" and classification.key or nil
+    remove_entity_key = spec.action == "remove"
+      and (categories.topology or categories.motion)
+      and classification.key
+      or nil
   }}
 end
 

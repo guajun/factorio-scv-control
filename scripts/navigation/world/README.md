@@ -19,6 +19,7 @@ storage.navigation_world = storage.navigation_world
   or NavigationWorld.new_state({region_size = 16})
 
 local world = NavigationWorld.new(storage.navigation_world, {
+  actor_collision_box = prototypes.entity.character.collision_box,
   actor_collision_mask = prototypes.entity.character.collision_mask,
   surface_resolver = function(index) return game.surfaces[index] end,
   tile_prototype_resolver = function(name) return prototypes.tile[name] end
@@ -32,8 +33,14 @@ without scanning an entire surface and without changing their revisions.
 
 ## Queries
 
-- `query(surface_index, position)` returns traversability, occupancy,
-  conditional transitions, motion observations, dependencies, and revisions.
+- `query(surface_index, position)` places the configured actor collision box at
+  the position, refreshes every intersecting region, and returns actor-center
+  traversability, static occupancy, conditional transitions, motion
+  observations, dependencies, and revisions. A call-specific
+  `actor_collision_box` can override the configured footprint.
+- `observe_transients(surface_index, bounds)` scans live moving actors in a
+  bounded local-steering area. Transient actors are never persisted in region
+  caches, and ordinary movement does not change world revisions.
 - `directed_motion(surface_index, from, to)` samples motion context for a
   directed edge. A later cost model owns the velocity formula.
 - `revision_snapshot(surface_index, bounds)` and

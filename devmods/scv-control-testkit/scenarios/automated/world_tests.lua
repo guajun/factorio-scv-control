@@ -6,6 +6,7 @@ local WorldTests = {}
 local REGION_SIZE = 8
 local ON_POSITION = {x = 74, y = 42}
 local OFF_POSITION = {x = 90, y = 42}
+local BOUNDARY_WALL_POSITION = {x = 80, y = 47}
 local MOTION_TILE_POSITION = {x = 75, y = 43}
 local OFF_MOTION_TILE_POSITION = {x = 92, y = 44}
 local TOPOLOGY_TILE_POSITION = {x = 77, y = 43}
@@ -76,12 +77,21 @@ end
 
 local function runtime_for(surface)
   return {
+    actor_collision_box = prototypes.entity.character.collision_box,
     actor_collision_mask = prototypes.entity.character.collision_mask,
     surface_resolver = function(surface_index)
       return surface_index == surface.index and surface or nil
     end,
     tile_prototype_resolver = function(name) return prototypes.tile[name] end
   }
+end
+
+local function count_region_dependencies(dependencies)
+  local count = 0
+  for _, dependency in ipairs(dependencies) do
+    if dependency.kind == "navigation-region" then count = count + 1 end
+  end
+  return count
 end
 
 local function cleanup(surface, area)
@@ -95,6 +105,35 @@ local function cleanup(surface, area)
     end
   end
   surface.set_tiles(tiles, true, false, false, false)
+end
+
+local function prepare_movement_area(surface)
+  local area = {{68, 54}, {90, 59}}
+  for _, entity in pairs(surface.find_entities_filtered({area = area})) do
+    entity.destroy()
+  end
+  local tiles = {}
+  for x = 68, 89 do
+    for y = 54, 58 do
+      tiles[#tiles + 1] = {name = "refined-concrete", position = {x, y}}
+    end
+  end
+  surface.set_tiles(tiles, true, false, false, false)
+  return area
+end
+
+local function observation_bounds(position)
+  return {
+    left_top = {x = position.x - 1, y = position.y - 1},
+    right_bottom = {x = position.x + 1, y = position.y + 1}
+  }
+end
+
+local function contains_unit(entities, unit_number)
+  for _, entity in ipairs(entities) do
+    if entity.unit_number == unit_number then return true end
+  end
+  return false
 end
 
 function WorldTests.run(surface)
@@ -198,6 +237,31 @@ function WorldTests.run(surface)
         on_before = on_before_off_event,
         on_after = on_after_off_event,
         off_after = off_after_off_event
+      })
+
+  local boundary_wall = surface.create_entity({
+    name = "stone-wall",
+    position = BOUNDARY_WALL_POSITION,
+    force = "neutral"
+  })
+  world:handle_event("script_raised_built", {entity = boundary_wall})
+  local actor_box = prototypes.entity.character.collision_box
+  local clearance_position = {
+    x = boundary_wall.bounding_box.left_top.x
+      - actor_box.right_bottom.x + 0.01,
+    y = boundary_wall.position.y
+  }
+  local clearance_query = world:query(surface_index, clearance_position)
+  add_result(results, "navigation_world.actor_footprint_crosses_region_boundary",
+    clearance_position.x < boundary_wall.bounding_box.left_top.x
+      and not clearance_query.traversable
+      and #clearance_query.occupancy >= 1
+      and count_region_dependencies(clearance_query.dependencies) >= 2, {
+        center = clearance_position,
+        actor_bounds = clearance_query.actor_bounds,
+        wall_bounds = boundary_wall.bounding_box,
+        dependencies = clearance_query.dependencies,
+        traversable = clearance_query.traversable
       })
 
   local belt = surface.create_entity({
@@ -459,6 +523,91 @@ function WorldTests.run(surface)
 
   cleanup(surface, area)
   return results
+end
+
+function WorldTests.start_movement(surface)
+  local area = prepare_movement_area(surface)
+  local character = surface.create_entity({
+    name = "character",
+    position = {x = 74, y = 56},
+    force = "player"
+  })
+  local start_position = {x = character.position.x, y = character.position.y}
+  local target_position = {x = 82, y = start_position.y}
+  local state = NavigationWorld.new_state({region_size = REGION_SIZE})
+  local world = NavigationWorld.new(state, runtime_for(surface))
+  world:handle_event("script_raised_built", {entity = character})
+  world:query(surface.index, start_position)
+  world:query(surface.index, target_position)
+  return {
+    area = area,
+    character = character,
+    state = state,
+    start_position = start_position,
+    target_position = target_position,
+    start_revisions = revisions_at(world, surface.index, start_position),
+    target_revisions = revisions_at(world, surface.index, target_position)
+  }
+end
+
+function WorldTests.update_movement(surface, test)
+  local character = test.character
+  if not character or not character.valid then
+    return {
+      name = "navigation_world.live_transients_follow_ordinary_movement",
+      passed = false,
+      details = {status = "character-invalid"}
+    }
+  end
+  if character.position.x < test.target_position.x then
+    character.walking_state = {walking = true, direction = defines.direction.east}
+    return nil
+  end
+
+  character.walking_state = {walking = false, direction = defines.direction.east}
+  local current_position = {x = character.position.x, y = character.position.y}
+  local world = NavigationWorld.new(test.state, runtime_for(surface))
+  local old_observation = world:observe_transients(
+    surface.index,
+    observation_bounds(test.start_position)
+  )
+  local current_observation = world:observe_transients(
+    surface.index,
+    observation_bounds(current_position)
+  )
+  local old_static = world:query(surface.index, test.start_position)
+  local current_static = world:query(surface.index, current_position)
+  local start_revisions = revisions_at(world, surface.index, test.start_position)
+  local target_revisions = revisions_at(world, surface.index, test.target_position)
+  local unit_number = character.unit_number
+  local crossed_region = math.floor(test.start_position.x / REGION_SIZE)
+    ~= math.floor(current_position.x / REGION_SIZE)
+  local passed = crossed_region
+    and not contains_unit(old_observation.entities, unit_number)
+    and contains_unit(current_observation.entities, unit_number)
+    and not contains_unit(old_static.occupancy, unit_number)
+    and not contains_unit(current_static.occupancy, unit_number)
+    and same_revisions(test.start_revisions, start_revisions)
+    and same_revisions(test.target_revisions, target_revisions)
+  local details = {
+    start_position = test.start_position,
+    current_position = current_position,
+    old_observation = old_observation,
+    current_observation = current_observation,
+    old_static_occupancy = old_static.occupancy,
+    current_static_occupancy = current_static.occupancy,
+    start_revisions_before = test.start_revisions,
+    start_revisions_after = start_revisions,
+    target_revisions_before = test.target_revisions,
+    target_revisions_after = target_revisions,
+    metrics = world:metrics()
+  }
+  character.destroy()
+  return {
+    name = "navigation_world.live_transients_follow_ordinary_movement",
+    passed = passed,
+    details = details
+  }
 end
 
 return WorldTests

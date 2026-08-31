@@ -82,6 +82,19 @@ function Geometry.translate(bounds, offset)
   }
 end
 
+function Geometry.place_bounds(position, relative_bounds)
+  return Geometry.translate(relative_bounds, position)
+end
+
+function Geometry.intersects(first, second)
+  first = Geometry.bounds(first)
+  second = Geometry.bounds(second)
+  return first.left_top.x < second.right_bottom.x
+    and first.right_bottom.x > second.left_top.x
+    and first.left_top.y < second.right_bottom.y
+    and first.right_bottom.y > second.left_top.y
+end
+
 function Geometry.orientation_envelope(position, prototype_bounds)
   position = Geometry.position(position)
   prototype_bounds = Geometry.bounds(prototype_bounds)
@@ -100,7 +113,6 @@ end
 function Geometry.region_key(rx, ry)
   return rx .. "," .. ry
 end
-
 
 function Geometry.region_coordinates(position, region_size)
   position = Geometry.position(position)
