@@ -3,6 +3,7 @@ local Profiles = require("__factorio-scv-control__/scripts/navigation/profiles/i
 local PlanningRun = require("__factorio-scv-control__/scripts/navigation/planning_run")
 local ProfileResolver = require("__factorio-scv-control__/scripts/navigation/profile_resolver")
 local Serializable = require("__factorio-scv-control__/scripts/navigation/serializable")
+local LeastCostSafe = require("__factorio-scv-control__/scripts/navigation/stages/least_cost_safe")
 
 local NavigationContractTests = {}
 local implementations_loaded, implementation_error = ProfileResolver.load_implementations()
@@ -363,6 +364,55 @@ function NavigationContractTests.run(expect)
       and optional_busy_run.candidates[2].status == "busy"
       and optional_busy_run.candidates[3].provider_id == "grid-a-star",
     {result = optional_busy}
+  )
+
+  local unsafe_selection, unsafe_selection_reason = LeastCostSafe.select({}, {
+    {
+      candidate = {status = "success", provider_id = "engine-normal"},
+      validator_results = {
+        {status = "fail"},
+        {status = "fail"}
+      },
+      cost_result = {status = "success", value = 1}
+    },
+    {
+      candidate = {status = "success", provider_id = "engine-inflated"},
+      validator_results = {
+        {status = "pass"},
+        {status = "fail"}
+      },
+      cost_result = {status = "success", value = 2}
+    }
+  })
+  expect(
+    "navigation.least_cost_safe_rejects_all_unsafe_candidates",
+    unsafe_selection == nil and unsafe_selection_reason == "no-safe-candidate",
+    {selected = unsafe_selection, reason = unsafe_selection_reason}
+  )
+
+  local unsafe_run, unsafe_progress, unsafe_runtime = planning_run("contract-unsafe")
+  unsafe_runtime.surface.find_entities = function()
+    return {{
+      valid = true,
+      prototype = {collision_mask = {layers = {player = true}}}
+    }}
+  end
+  unsafe_runtime.actor.prototype.collision_mask.layers.player = true
+  unsafe_progress = PlanningRun.handle_result(unsafe_run, {
+    id = unsafe_progress.request_id,
+    path = {{position = {x = 4, y = 0}}}
+  }, unsafe_runtime)
+  local unsafe_result = PlanningRun.handle_result(unsafe_run, {
+    id = unsafe_progress.request_id,
+    path = {{position = {x = 4, y = 0}}}
+  }, unsafe_runtime)
+  expect(
+    "navigation.planning_run_never_activates_all_unsafe_candidates",
+    unsafe_result.status == "failed"
+      and unsafe_result.reason == "no-safe-candidate"
+      and unsafe_result.route == nil
+      and unsafe_result.selected_provider_id == nil,
+    {result = unsafe_result}
   )
 
   local failed_run, failed_progress, failed_runtime = planning_run("contract-failed")
