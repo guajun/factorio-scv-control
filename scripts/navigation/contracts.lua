@@ -12,6 +12,7 @@ Contracts.SCHEMAS = {
   validator_result = {version = 1},
   cost_result = {version = 1},
   metrics = {version = 1},
+  planning_result = {version = 1},
   terminal_result = {version = 1}
 }
 
@@ -422,6 +423,69 @@ validators.terminal_result = function(value)
       validation_error.path = "$.route" .. validation_error.path:sub(2)
       return false, validation_error
     end
+  end
+  if value.reason ~= nil then
+    ok, validation_error = nonempty_string(contract, value.reason, "$.reason")
+    if not ok then return false, validation_error end
+  end
+  return optional_metrics(contract, value.metrics, "$.metrics")
+end
+
+validators.planning_result = function(value)
+  local contract = "planning_result"
+  local ok, validation_error = require_plain_table(contract, value)
+  if not ok then return false, validation_error end
+  ok, validation_error = enum_value(
+    contract,
+    value.status,
+    {
+      success = true,
+      ["no-path"] = true,
+      ["busy-retry"] = true,
+      cancelled = true,
+      stale = true,
+      failed = true
+    },
+    "$.status"
+  )
+  if not ok then return false, validation_error end
+  if value.status == "success" then
+    if value.route == nil then
+      return failure(contract, "missing-route", "$.route", "Successful planning results require a route.")
+    end
+    ok, validation_error = validators.route(value.route)
+    if not ok then
+      validation_error.contract = contract
+      validation_error.path = "$.route" .. validation_error.path:sub(2)
+      return false, validation_error
+    end
+  elseif value.route ~= nil then
+    return failure(contract, "unexpected-route", "$.route", "Only successful planning results can contain a route.")
+  end
+  ok, validation_error = string_array(contract, value.provider_order, "$.provider_order")
+  if not ok then return false, validation_error end
+  local trace_length
+  trace_length, validation_error = array_length(contract, value.trace, "$.trace")
+  if not trace_length then return false, validation_error end
+  local candidate_length
+  candidate_length, validation_error = array_length(contract, value.candidates, "$.candidates")
+  if not candidate_length then return false, validation_error end
+  for index = 1, candidate_length do
+    ok, validation_error = validators.candidate(value.candidates[index])
+    if not ok then
+      validation_error.contract = contract
+      validation_error.path = "$.candidates[" .. index .. "]" .. validation_error.path:sub(2)
+      return false, validation_error
+    end
+  end
+  if value.retry_after_ticks ~= nil then
+    ok, validation_error = finite_number(
+      contract,
+      value.retry_after_ticks,
+      "$.retry_after_ticks",
+      0
+    )
+    if not ok then return false, validation_error end
   end
   if value.reason ~= nil then
     ok, validation_error = nonempty_string(contract, value.reason, "$.reason")

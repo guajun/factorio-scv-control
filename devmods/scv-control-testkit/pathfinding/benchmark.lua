@@ -1,9 +1,10 @@
 local GridSearch = require("__factorio-scv-control__/scripts/grid_search")
-local LocalPlanner = require("__factorio-scv-control__/scripts/local_planner")
 local NavigationGrid = require("__factorio-scv-control__/scripts/navigation_grid")
 local PathMath = require("__factorio-scv-control__/scripts/path_math")
 local PathSmoothing = require("__factorio-scv-control__/scripts/path_smoothing")
 local Policy = require("__factorio-scv-control__/scripts/navigation_policy")
+local PlanningRun = require("__factorio-scv-control__/scripts/navigation/planning_run")
+local Profiles = require("__factorio-scv-control__/scripts/navigation/profiles/init")
 
 local Benchmark = {}
 Benchmark.GRID_RESOLUTION = Policy.grid.resolution
@@ -49,7 +50,12 @@ local function path_result(surface, actor, fixture, algorithm, path, extra)
       surface_line_checks = extra.surface_line_checks,
       request_count = extra.request_count or 0,
       duration_ticks = extra.duration_ticks or 0,
-      optimization_status = extra.optimization_status
+      optimization_status = extra.optimization_status,
+      selected_source = extra.selected_source,
+      planning_terminal_status = extra.planning_terminal_status,
+      provider_order = extra.provider_order,
+      trace = extra.trace,
+      failure_reason = extra.failure_reason
     }
   end
 
@@ -79,7 +85,11 @@ local function path_result(surface, actor, fixture, algorithm, path, extra)
     duration_ticks = extra.duration_ticks or 0,
     optimization_status = extra.optimization_status,
     selected_candidate_index = extra.selected_candidate_index,
-    selected_source = extra.selected_source
+    selected_source = extra.selected_source,
+    planning_terminal_status = extra.planning_terminal_status,
+    provider_order = extra.provider_order,
+    trace = extra.trace,
+    failure_reason = extra.failure_reason
   }
 end
 
@@ -180,61 +190,6 @@ local function start_alternate_candidate(state, candidate_index)
     segment = 2
   })
   return true
-end
-
-local function record_production_local(state, baseline_path, status)
-  if not algorithm_selected(state, "production-local")
-      and not algorithm_selected(state, "safe-hybrid") then
-    return
-  end
-  if not baseline_path then
-    state.results["production-local"] = path_result(
-      state.surface,
-      state.actor,
-      state.fixture,
-      "production-local",
-      nil,
-      {
-        status = status,
-        request_count = state.request_counts.baseline + state.request_counts.inflated,
-        duration_ticks = game.tick - state.started_tick
-      }
-    )
-    return
-  end
-  local additional_candidates = {}
-  local inflated = state.results["engine-inflated"]
-  if inflated and inflated.status == "success" then
-    additional_candidates[1] = {
-      source = "engine-inflated",
-      path = inflated.path
-    }
-  end
-  local comparison = LocalPlanner.compare(
-    state.surface,
-    state.actor,
-    state.fixture.start,
-    state.fixture.goal,
-    baseline_path,
-    additional_candidates
-  )
-  state.results["production-local"] = path_result(
-    state.surface,
-    state.actor,
-    state.fixture,
-    "production-local",
-    comparison.path,
-    {
-      request_count = state.request_counts.baseline + state.request_counts.inflated,
-      duration_ticks = game.tick - state.started_tick,
-      optimization_status = "engine-vs-inflated-engine-vs-conservative-local-grid",
-      selected_source = comparison.source,
-      expanded_nodes = comparison.expanded_nodes,
-      generated_nodes = comparison.generated_nodes,
-      sampled_nodes = comparison.sampled_nodes,
-      line_checks = comparison.line_checks
-    }
-  )
 end
 
 local function finish_benchmark(state)
@@ -397,6 +352,150 @@ local function finish_alternates(state)
   finish_benchmark(state)
 end
 
+local function continue_after_baseline(state)
+  local baseline = state.results.engine
+  if not baseline or baseline.status ~= "success" then
+    alternate_fallback(state, "baseline-" .. (baseline and baseline.status or "missing"))
+    return
+  end
+
+  local needs_production_alternate = algorithm_selected(state, "engine-alternate")
+  local needs_global_alternate = algorithm_selected(state, "engine-alternate-global")
+  state.production_alternate_eligible = baseline.detour_ratio
+    > Policy.optimization.detour_ratio
+  if not needs_production_alternate and not needs_global_alternate then
+    finish_benchmark(state)
+    return
+  end
+  if not state.production_alternate_eligible and not needs_global_alternate then
+    alternate_fallback(state, "not-eligible")
+    return
+  end
+
+  local vias = PathMath.alternate_vias(
+    state.surface,
+    state.actor.name,
+    state.fixture.start,
+    state.fixture.goal,
+    baseline.path
+  )
+  if #vias == 0 then
+    alternate_fallback(state, "no-via")
+    return
+  end
+  state.alternate = {candidates = {}, active_candidate_index = nil}
+  for index, spec in ipairs(vias) do
+    state.alternate.candidates[index] = {
+      fraction = spec.fraction,
+      via = PathMath.copy_position(spec.position)
+    }
+  end
+  start_alternate_candidate(state, 1)
+end
+
+local function candidate_for(run, provider_id)
+  for _, candidate in ipairs(run.candidates) do
+    if candidate.provider_id == provider_id then return candidate end
+  end
+  return nil
+end
+
+local function metric_values(candidate)
+  return candidate
+    and candidate.route
+    and candidate.route.metrics
+    and candidate.route.metrics.values
+    or {}
+end
+
+local function planning_status(result)
+  if result.status == "busy-retry" then return "busy" end
+  return result.status
+end
+
+local function record_shared_planning(state, result)
+  local run = state.planning_run
+  local request_count = result.metrics.values.request_count
+  local duration_ticks = result.metrics.values.duration_ticks
+  local normal = candidate_for(run, "engine-normal")
+  local inflated = candidate_for(run, "engine-inflated")
+  local grid = candidate_for(run, "grid-a-star")
+  local normal_metrics = metric_values(normal)
+  local inflated_metrics = metric_values(inflated)
+  local grid_metrics = metric_values(grid)
+  local trace = PlanningRun.provider_trace(run)
+
+  state.request_counts.baseline = normal and 1 or 0
+  state.request_counts.inflated = inflated and 1 or 0
+  state.results.engine = path_result(
+    state.surface,
+    state.actor,
+    state.fixture,
+    "engine",
+    normal and normal.route and normal.route.points or nil,
+    {
+      status = normal and normal.status or planning_status(result),
+      raw_distance = normal_metrics.raw_distance,
+      raw_waypoint_count = normal_metrics.raw_waypoint_count,
+      request_count = state.request_counts.baseline,
+      duration_ticks = duration_ticks
+    }
+  )
+  if inflated then
+    state.results["engine-inflated"] = path_result(
+      state.surface,
+      state.actor,
+      state.fixture,
+      "engine-inflated",
+      inflated.route and inflated.route.points or nil,
+      {
+        status = inflated.status,
+        raw_distance = inflated_metrics.raw_distance,
+        raw_waypoint_count = inflated_metrics.raw_waypoint_count,
+        request_count = state.request_counts.inflated,
+        duration_ticks = duration_ticks,
+        optimization_status = "inflated-trajectory-envelope"
+      }
+    )
+  end
+  state.results["production-local"] = path_result(
+    state.surface,
+    state.actor,
+    state.fixture,
+    "production-local",
+    result.route and result.route.points or nil,
+    {
+      status = planning_status(result),
+      request_count = request_count,
+      duration_ticks = duration_ticks,
+      optimization_status = "shared-production-v1-planning-run",
+      selected_source = result.selected_source,
+      expanded_nodes = grid_metrics.expanded_nodes,
+      generated_nodes = grid_metrics.generated_nodes,
+      sampled_nodes = grid_metrics.sampled_nodes,
+      line_checks = grid_metrics.line_checks,
+      planning_terminal_status = result.status,
+      provider_order = result.provider_order,
+      trace = trace,
+      failure_reason = result.reason
+    }
+  )
+  if not inflated and algorithm_selected(state, "engine-inflated") then
+    state.resume_after_inflated = "shared-planning"
+    request_path(state, "inflated-baseline", state.fixture.start, state.fixture.goal)
+    return
+  end
+  continue_after_baseline(state)
+end
+
+local function planning_runtime(state)
+  return {
+    surface = state.surface,
+    actor = state.actor,
+    tick = function() return game.tick end
+  }
+end
+
 function Benchmark.start(surface, actor, fixture, selected_algorithms)
   local state = {
     surface = surface,
@@ -425,14 +524,39 @@ function Benchmark.start(surface, actor, fixture, selected_algorithms)
     run_selected_grid_algorithms(state, grid)
   end
 
+  local needs_production_run = algorithm_selected(state, "production-local")
+    or algorithm_selected(state, "safe-hybrid")
+  if needs_production_run then
+    local run, progress = PlanningRun.start(Profiles.default_reference(), {
+      id = fixture.id,
+      adapter_id = "benchmark",
+      start_position = fixture.start,
+      goal_position = fixture.goal,
+      reason = "benchmark"
+    }, planning_runtime(state))
+    state.planning_run = run
+    if not run then
+      state.results["production-local"] = path_result(
+        surface,
+        actor,
+        fixture,
+        "production-local",
+        nil,
+        {status = "failed", optimization_status = progress and progress.message}
+      )
+      finish_benchmark(state)
+    elseif progress.status ~= "pending" then
+      record_shared_planning(state, progress)
+    end
+    return state
+  end
+
   state.needs_engine = algorithm_selected(state, "engine")
     or algorithm_selected(state, "production-local")
     or algorithm_selected(state, "engine-alternate")
     or algorithm_selected(state, "engine-alternate-global")
     or algorithm_selected(state, "safe-hybrid")
   local needs_inflated = algorithm_selected(state, "engine-inflated")
-    or algorithm_selected(state, "production-local")
-    or algorithm_selected(state, "safe-hybrid")
   if needs_inflated then
     request_path(state, "inflated-baseline", fixture.start, fixture.goal)
     return state
@@ -446,6 +570,18 @@ function Benchmark.start(surface, actor, fixture, selected_algorithms)
 end
 
 function Benchmark.handle_path_result(state, event)
+  if state.planning_run
+      and state.planning_run.status == "running"
+      and state.planning_run.pending_request_id == event.id then
+    local progress = PlanningRun.handle_result(
+      state.planning_run,
+      event,
+      planning_runtime(state)
+    )
+    if progress.status ~= "pending" then record_shared_planning(state, progress) end
+    return true
+  end
+
   local request = state.requests[event.id]
   state.requests[event.id] = nil
   if not request or state.complete then return false end
@@ -499,7 +635,10 @@ function Benchmark.handle_path_result(state, event)
         }
       )
     end
-    if state.needs_engine then
+    if state.resume_after_inflated == "shared-planning" then
+      state.resume_after_inflated = nil
+      continue_after_baseline(state)
+    elseif state.needs_engine then
       request_path(state, "baseline", state.fixture.start, state.fixture.goal)
     else
       finish_benchmark(state)
@@ -521,7 +660,6 @@ function Benchmark.handle_path_result(state, event)
           optimization_status = "busy"
         }
       )
-      record_production_local(state, nil, "busy")
       alternate_fallback(state, "baseline-busy")
       return true
     end
@@ -537,7 +675,6 @@ function Benchmark.handle_path_result(state, event)
           duration_ticks = game.tick - state.started_tick
         }
       )
-      record_production_local(state, nil, "no-path")
       alternate_fallback(state, "baseline-no-path")
       return true
     end
@@ -562,42 +699,7 @@ function Benchmark.handle_path_result(state, event)
         duration_ticks = game.tick - state.started_tick
       }
     )
-    record_production_local(state, path, "success")
-
-    local needs_production_alternate = algorithm_selected(state, "engine-alternate")
-    local needs_global_alternate = algorithm_selected(state, "engine-alternate-global")
-    state.production_alternate_eligible = state.results.engine.detour_ratio
-      > Policy.optimization.detour_ratio
-    if not needs_production_alternate and not needs_global_alternate then
-      finish_benchmark(state)
-      return true
-    end
-
-    if not state.production_alternate_eligible and not needs_global_alternate then
-      alternate_fallback(state, "not-eligible")
-      return true
-    end
-
-    local vias = PathMath.alternate_vias(
-      state.surface,
-      state.actor.name,
-      state.fixture.start,
-      state.fixture.goal,
-      path
-    )
-    if #vias == 0 then
-      alternate_fallback(state, "no-via")
-      return true
-    end
-
-    state.alternate = {candidates = {}, active_candidate_index = nil}
-    for index, spec in ipairs(vias) do
-      state.alternate.candidates[index] = {
-        fraction = spec.fraction,
-        via = PathMath.copy_position(spec.position)
-      }
-    end
-    start_alternate_candidate(state, 1)
+    continue_after_baseline(state)
     return true
   end
 

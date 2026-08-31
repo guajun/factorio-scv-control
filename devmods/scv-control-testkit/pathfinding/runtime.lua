@@ -170,7 +170,15 @@ end
 
 local function production_result(surface, actor, fixture, payload)
   local path = payload.production_path
-  if not path then return {algorithm = "production", status = payload.production_status} end
+  if not path then
+    return {
+      algorithm = "production",
+      status = payload.production_status,
+      provider_order = payload.production_provider_order,
+      trace = payload.production_trace,
+      selected_source = payload.production_selected_source
+    }
+  end
   return {
     algorithm = "production",
     status = "success",
@@ -191,7 +199,10 @@ local function production_result(surface, actor, fixture, payload)
       actor,
       fixture.start,
       path
-    )
+    ),
+    provider_order = payload.production_provider_order,
+    trace = payload.production_trace,
+    selected_source = payload.production_selected_source
   }
 end
 
@@ -509,6 +520,22 @@ local function add_assertion(suite, name, passed, details)
   if passed then suite.passed = suite.passed + 1 else suite.failed = suite.failed + 1 end
 end
 
+local function arrays_equal(first, second)
+  if not first or not second or #first ~= #second then return false end
+  for index = 1, #first do
+    if first[index] ~= second[index] then return false end
+  end
+  return true
+end
+
+local function provider_starts(trace)
+  local result = {}
+  for _, entry in ipairs(trace or {}) do
+    if entry.event == "provider-start" then result[#result + 1] = entry.provider_id end
+  end
+  return result
+end
+
 local function validate_test_set(suite)
   local results_by_id = {}
   local categories = {}
@@ -536,6 +563,36 @@ local function validate_test_set(suite)
     fixture_count = #suite.fixture_results,
     categories = categories
   })
+
+  local expected_provider_order = {"engine-normal", "engine-inflated", "grid-a-star"}
+  local shared_trace_ok = true
+  local trace_details = {}
+  for _, result in ipairs(suite.fixture_results) do
+    local production = result.results["production-local"]
+    local starts = production and provider_starts(production.trace) or {}
+    local expected_starts = result.expected_path and expected_provider_order or {"engine-normal"}
+    local terminal = production and production.trace and production.trace[#production.trace]
+    local valid = production
+      and arrays_equal(production.provider_order, expected_provider_order)
+      and arrays_equal(starts, expected_starts)
+      and terminal
+      and terminal.event == "terminal"
+      and ((result.expected_path and terminal.status == "success")
+        or (not result.expected_path and terminal.status == "no-path"))
+    shared_trace_ok = shared_trace_ok and valid == true
+    trace_details[#trace_details + 1] = {
+      fixture = result.id,
+      provider_order = production and production.provider_order,
+      starts = starts,
+      terminal = terminal and terminal.status
+    }
+  end
+  add_assertion(
+    suite,
+    "benchmark.production-equivalent-planning-trace",
+    shared_trace_ok,
+    trace_details
+  )
 
   local gate_open = results_by_id["gate-open"]
   local gate_closed = results_by_id["gate-closed"]

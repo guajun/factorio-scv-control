@@ -4,6 +4,18 @@ New entries go at the top. Keep failed hypotheses and operational mistakes: the 
 
 Each entry should state the question, exact fixture/version, measured result, falsified assumption, and decision. Generated JSON remains the source of exact per-path data; this document records why the result changed the design.
 
+## 2026-08-31 - Shared PlanningRun makes benchmark order production-equivalent
+
+**Question:** Can production and the static benchmark share candidate algorithms without also sharing the asynchronous request state machine?
+
+**Fixture version:** 4, eleven fixtures and ten reported algorithms on Factorio 2.0.77.
+
+**Measured result:** The shared `production-v1` run issued `engine-normal`, then `engine-inflated`, then synchronous `grid-a-star` for every reachable fixture. The unreachable fixture terminated after `engine-normal` reported no-path; the standalone inflated-engine benchmark then ran through its isolated legacy adapter. `production-local` solved 10/10 reachable fixtures with zero trajectory-clearance violations, 21 production engine requests, 8,310 expanded local nodes, and 33,733 in-memory line checks. Representative selected distances remained `20.17` for `tight-clearance-corridor`, `26.81` for `long-wall-return`, and `36.68` for `captured-slalom-return`.
+
+**Falsified assumption:** Sharing only `LocalPlanner.compare` does not make an evaluation production-equivalent. The previous benchmark requested the inflated path first, duplicated busy/no-path control flow, and could perturb Factorio's scheduling-sensitive normal result.
+
+**Decision:** `PlanningRun` owns provider order, request correlation, terminal states, post-processing, validation, scoring, selection, and deterministic traces. Production, engine-backed integration, `production-local`, and live preview use that run. Historical alternate, standalone engine, and experimental grid algorithms remain benchmark-only adapters and cannot alter the production provider sequence.
+
 ## 2026-08-31 - Tight corridor needs the inflated-engine candidate in production
 
 **Question:** Why did live plans near the `tight` marker increasingly route around the wall columns even though the corridor was physically traversable?

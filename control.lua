@@ -31,8 +31,7 @@ local function clear_active(state)
   state.trajectory = nil
   state.recovery_waypoint_index = nil
   state.recovery_attempts = 0
-  state.pending_request = nil
-  state.pending_local_comparison = nil
+  state.planning_run = nil
   state.stuck_retries = 0
   state.last_position = nil
   state.retry_tick = nil
@@ -45,8 +44,6 @@ local function finish_active(player, state)
 end
 
 local function activate_path(player, state, path)
-  state.pending_request = nil
-  state.pending_local_comparison = nil
   state.path = path
   state.waypoint_index = 1
   state.segment_start = PathMath.copy_position(player.position)
@@ -73,6 +70,7 @@ end
 
 local function cancel_all(player)
   local state = State.get(player.index)
+  Planner.cancel(player, state, "command-cancelled")
   Queue.clear(state)
   clear_active(state)
   stop_walking(player)

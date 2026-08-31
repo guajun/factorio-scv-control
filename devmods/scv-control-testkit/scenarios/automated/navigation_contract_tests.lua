@@ -1,5 +1,6 @@
 local Contracts = require("__factorio-scv-control__/scripts/navigation/contracts")
 local Profiles = require("__factorio-scv-control__/scripts/navigation/profiles/init")
+local PlanningRun = require("__factorio-scv-control__/scripts/navigation/planning_run")
 local ProfileResolver = require("__factorio-scv-control__/scripts/navigation/profile_resolver")
 local Serializable = require("__factorio-scv-control__/scripts/navigation/serializable")
 
@@ -13,6 +14,77 @@ local function copy(value)
   local result, copy_error = Serializable.copy(value)
   if not result then error(copy_error.message) end
   return result
+end
+
+local function fake_planning_runtime()
+  local next_request_id = 100
+  return {
+    surface = {
+      find_entities = function() return {} end,
+      find_tiles_filtered = function() return {} end
+    },
+    actor = {
+      name = "character",
+      position = {x = 0, y = 0},
+      force = "player",
+      character_running_speed = 0.15,
+      prototype = {
+        collision_box = {
+          left_top = {x = -0.2, y = -0.2},
+          right_bottom = {x = 0.2, y = 0.2}
+        },
+        collision_mask = {layers = {}}
+      }
+    },
+    tick = 10,
+    request_path = function()
+      next_request_id = next_request_id + 1
+      return next_request_id
+    end
+  }
+end
+
+local function planning_run(adapter_id)
+  local runtime = fake_planning_runtime()
+  local run, progress = PlanningRun.start(Profiles.default_reference(), {
+    id = 1,
+    adapter_id = adapter_id,
+    start_position = {x = 0, y = 0},
+    goal_position = {x = 4, y = 0},
+    reason = "contract-test"
+  }, runtime)
+  return run, progress, runtime
+end
+
+local function successful_planning_run(adapter_id)
+  local run, progress, runtime = planning_run(adapter_id)
+  progress = PlanningRun.handle_result(run, {
+    id = progress.request_id,
+    path = {
+      {position = {x = 1, y = 0}},
+      {position = {x = 4, y = 0}}
+    }
+  }, runtime)
+  progress = PlanningRun.handle_result(run, {
+    id = progress.request_id,
+    path = {
+      {position = {x = 2, y = 0}},
+      {position = {x = 4, y = 0}}
+    }
+  }, runtime)
+  return run, progress
+end
+
+local function deep_equal(first, second)
+  if type(first) ~= type(second) then return false end
+  if type(first) ~= "table" then return first == second end
+  for key, value in pairs(first) do
+    if not deep_equal(value, second[key]) then return false end
+  end
+  for key in pairs(second) do
+    if first[key] == nil then return false end
+  end
+  return true
 end
 
 function NavigationContractTests.run(expect)
@@ -120,6 +192,20 @@ function NavigationContractTests.run(expect)
       }
     },
     {
+      name = "planning_result",
+      value = {
+        schema_version = Contracts.VERSION,
+        status = "success",
+        adapter_id = "contract-test",
+        profile_id = "production-v1",
+        provider_order = {"engine-normal", "engine-inflated", "grid-a-star"},
+        trace = {},
+        candidates = {},
+        route = route,
+        metrics = metrics
+      }
+    },
+    {
       name = "terminal_result",
       value = {
         schema_version = Contracts.VERSION,
@@ -219,6 +305,103 @@ function NavigationContractTests.run(expect)
     "navigation.contract_rejects_success_without_route",
     not ok_candidate and candidate_error.code == "missing-route",
     {error = candidate_error}
+  )
+
+  local production_run, production_result = successful_planning_run("production")
+  local benchmark_run, benchmark_result = successful_planning_run("benchmark")
+  local production_trace = PlanningRun.provider_trace(production_run)
+  local benchmark_trace = PlanningRun.provider_trace(benchmark_run)
+  expect(
+    "navigation.production_and_benchmark_share_planning_transitions",
+    production_result.status == "success"
+      and benchmark_result.status == "success"
+      and deep_equal(production_result.provider_order, benchmark_result.provider_order)
+      and deep_equal(production_trace, benchmark_trace)
+      and production_trace[1].provider_id == "engine-normal"
+      and production_trace[4].provider_id == "engine-inflated"
+      and production_trace[7].provider_id == "grid-a-star"
+      and production_trace[#production_trace].status == "success",
+    {production = production_trace, benchmark = benchmark_trace}
+  )
+
+  local no_path_run, no_path_progress, no_path_runtime = planning_run("contract-no-path")
+  local no_path = PlanningRun.handle_result(no_path_run, {
+    id = no_path_progress.request_id
+  }, no_path_runtime)
+  local busy_run, busy_progress, busy_runtime = planning_run("contract-busy")
+  local busy = PlanningRun.handle_result(busy_run, {
+    id = busy_progress.request_id,
+    try_again_later = true
+  }, busy_runtime)
+  expect(
+    "navigation.planning_run_structured_terminal_states",
+    no_path.status == "no-path"
+      and busy.status == "busy-retry"
+      and busy.retry_after_ticks > 0,
+    {no_path = no_path, busy = busy}
+  )
+
+  local optional_busy_run, optional_busy_progress, optional_busy_runtime = planning_run(
+    "contract-optional-busy"
+  )
+  optional_busy_progress = PlanningRun.handle_result(optional_busy_run, {
+    id = optional_busy_progress.request_id,
+    path = {
+      {position = {x = 1, y = 0}},
+      {position = {x = 4, y = 0}}
+    }
+  }, optional_busy_runtime)
+  local optional_busy = PlanningRun.handle_result(optional_busy_run, {
+    id = optional_busy_progress.request_id,
+    try_again_later = true
+  }, optional_busy_runtime)
+  expect(
+    "navigation.optional_provider_busy_continues_to_safe_fallback",
+    optional_busy.status == "success"
+      and optional_busy.selected_provider_id == "engine-normal"
+      and optional_busy_run.candidates[2].provider_id == "engine-inflated"
+      and optional_busy_run.candidates[2].status == "busy"
+      and optional_busy_run.candidates[3].provider_id == "grid-a-star",
+    {result = optional_busy}
+  )
+
+  local failed_run, failed_progress, failed_runtime = planning_run("contract-failed")
+  failed_runtime.surface.find_entities = function() error("forced-component-failure") end
+  local failed = PlanningRun.handle_result(failed_run, {
+    id = failed_progress.request_id,
+    path = {{position = {x = 4, y = 0}}}
+  }, failed_runtime)
+  expect(
+    "navigation.component_errors_become_failed_terminal_results",
+    failed.status == "failed"
+      and failed.reason:find("forced%-component%-failure") ~= nil
+      and failed.route == nil,
+    {result = failed}
+  )
+
+  local cancelled_run, pending, cancelled_runtime = planning_run("contract-cancel")
+  local stale_before_cancel = PlanningRun.handle_result(cancelled_run, {
+    id = pending.request_id + 1000,
+    path = {{position = {x = 4, y = 0}}}
+  }, cancelled_runtime)
+  local cancelled = PlanningRun.cancel(cancelled_run, "contract-cancelled", cancelled_runtime)
+  local stale_after_cancel = PlanningRun.handle_result(cancelled_run, {
+    id = pending.request_id,
+    path = {{position = {x = 4, y = 0}}}
+  }, cancelled_runtime)
+  expect(
+    "navigation.cancelled_and_stale_results_cannot_activate_route",
+    stale_before_cancel.status == "stale"
+      and cancelled.status == "cancelled"
+      and cancelled.route == nil
+      and stale_after_cancel.status == "stale"
+      and stale_after_cancel.route == nil
+      and cancelled_run.status == "cancelled",
+    {
+      stale_before_cancel = stale_before_cancel,
+      cancelled = cancelled,
+      stale_after_cancel = stale_after_cancel
+    }
   )
 end
 
