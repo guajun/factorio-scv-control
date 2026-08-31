@@ -13,6 +13,8 @@ local function key(ix, iy)
 end
 
 function NavigationGrid.capture(surface, character, bounds, resolution)
+  local snapshot_clearance = PathSmoothing.clearance_margin(character)
+    + resolution * math.sqrt(2) / 2
   local grid = {
     resolution = resolution,
     min_ix = math.ceil(bounds[1][1] / resolution),
@@ -43,7 +45,12 @@ function NavigationGrid.capture(surface, character, bounds, resolution)
   for ix = grid.min_ix, grid.max_ix do
     for iy = grid.min_iy, grid.max_iy do
       grid.sampled_nodes = grid.sampled_nodes + 1
-      if not PathSmoothing.position_is_clear(surface, character, grid:position(ix, iy)) then
+      if not PathSmoothing.position_is_clear(
+        surface,
+        character,
+        grid:position(ix, iy),
+        snapshot_clearance
+      ) then
         grid.blocked[key(ix, iy)] = true
       end
     end

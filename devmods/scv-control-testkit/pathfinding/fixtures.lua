@@ -1,6 +1,6 @@
 local Fixtures = {}
 
-Fixtures.VERSION = 2
+Fixtures.VERSION = 3
 Fixtures.AREA = {{-64, -32}, {64, 32}}
 
 local definitions = {
@@ -51,6 +51,25 @@ local definitions = {
     walls = {
       {from = {x = -42, y = -12}, to = {x = -8, y = -12}},
       {from = {x = -42, y = -6}, to = {x = -8, y = -6}}
+    }
+  },
+  {
+    id = "tight-clearance-corridor",
+    title = "Tight corridor at the trajectory-clearance boundary",
+    category = "clearance-boundary",
+    bounds = {{6, -12}, {14, 12}},
+    start = {x = 10, y = -10},
+    goal = {x = 10, y = 10},
+    expected_path = true,
+    allowed_no_path = {
+      ["grid-a-star"] = true,
+      ["grid-weighted-a-star-2"] = true,
+      ["grid-theta-star"] = true,
+      ["grid-theta-star-exact"] = true
+    },
+    walls = {
+      {from = {x = 9, y = -8}, to = {x = 9, y = 8}},
+      {from = {x = 11, y = -8}, to = {x = 11, y = 8}}
     }
   },
   {
@@ -181,7 +200,9 @@ function Fixtures.clear(surface)
     entity.destroy()
   end
   surface.destroy_decoratives({area = Fixtures.AREA})
-  rendering.clear()
+  for _, object in pairs(rendering.get_all_objects()) do
+    if object.surface == surface then object.destroy() end
+  end
 end
 
 function Fixtures.build(surface, fixture)
@@ -196,6 +217,71 @@ function Fixtures.build(surface, fixture)
   for _, line in ipairs(fixture.walls) do
     each_line_position(line, function(position) create_wall(surface, position) end)
   end
+end
+
+function Fixtures.build_at(surface, fixture, offset, draw_labels)
+  offset = offset or {x = 0, y = 0}
+  for _, line in ipairs(fixture.walls) do
+    each_line_position(line, function(position)
+      create_wall(surface, {
+        x = position.x + offset.x,
+        y = position.y + offset.y
+      })
+    end)
+  end
+
+  local bounds = {
+    {fixture.bounds[1][1] + offset.x, fixture.bounds[1][2] + offset.y},
+    {fixture.bounds[2][1] + offset.x, fixture.bounds[2][2] + offset.y}
+  }
+  local start = {x = fixture.start.x + offset.x, y = fixture.start.y + offset.y}
+  local goal = {x = fixture.goal.x + offset.x, y = fixture.goal.y + offset.y}
+  if draw_labels then
+    rendering.draw_rectangle({
+      color = {r = 0.3, g = 0.75, b = 1, a = 0.75},
+      width = 2,
+      filled = false,
+      left_top = bounds[1],
+      right_bottom = bounds[2],
+      surface = surface,
+      draw_on_ground = true
+    })
+    rendering.draw_text({
+      text = fixture.id,
+      color = {r = 0.9, g = 0.95, b = 1},
+      target = {x = bounds[1][1] + 0.5, y = bounds[1][2] + 0.5},
+      surface = surface,
+      alignment = "left",
+      vertical_alignment = "top",
+      scale_with_zoom = false,
+      draw_on_ground = true
+    })
+    for _, marker in ipairs({
+      {position = start, color = {r = 0.2, g = 1, b = 0.35, a = 0.9}, text = "S"},
+      {position = goal, color = {r = 1, g = 0.25, b = 0.2, a = 0.9}, text = "G"}
+    }) do
+      rendering.draw_circle({
+        color = marker.color,
+        radius = 0.5,
+        width = 4,
+        filled = false,
+        target = marker.position,
+        surface = surface,
+        draw_on_ground = true
+      })
+      rendering.draw_text({
+        text = marker.text,
+        color = {r = 1, g = 1, b = 1},
+        target = marker.position,
+        surface = surface,
+        alignment = "center",
+        vertical_alignment = "middle",
+        scale_with_zoom = false,
+        draw_on_ground = true
+      })
+    end
+  end
+  return {bounds = bounds, start = start, goal = goal}
 end
 
 return Fixtures

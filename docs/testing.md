@@ -51,6 +51,8 @@ The external runner treats missing reports, timeouts, Lua errors, and failed ass
 
 The benchmark scenario writes `script-output/scv-control/pathfinding-benchmark.json` and `SCV_BENCH_COMPLETE passed=N failed=N`. See [pathfinding benchmark](pathfinding-benchmark.md) for fixtures, metrics, current results, and interactive commands. See [navigation policy](navigation-policy.md) for the complete hardcoded-parameter inventory.
 
+Pathfinding experiments and failures are recorded newest-first in [the experiment log](pathfinding-experiments.md). Add an entry whenever an experiment changes a planner assumption, even if no production code is selected.
+
 The integration suite does not use a fixed tick count as a success condition. It exits when every task reaches its terminal assertion. `TEST_TIMEOUT_TICKS` is only a failure guard for deadlocks and regressions.
 
 ## Adding a regression
@@ -60,9 +62,7 @@ The integration suite does not use a fixed tick count as a success condition. It
 3. Assert bounded outcomes such as path length, detour ratio, arrival error, selected candidate, or failure status.
 4. Run `-Suite integration`, then `-Suite all`.
 
-The corridor regression uses exact coordinates captured by the planner logger. Factorio 2.0.77 returns a 47.10-tile baseline for a target only 9.09 tiles away. The regression evaluates lateral fractions 0.50 and 0.75 in strict sequence, requires the nearer probe to beat the overshooting fallback, bounds the selected route below 34 tiles, and then waits for the character to arrive. The accepted fixture currently selects a 28.81-tile route and completes movement in 137 ticks.
-
-Alternate probes are deliberately sequential. Engine-backed experiments showed that unrelated simultaneous path requests can change Factorio's non-optimal pathfinder result. The two segments belonging to one probe may run together, but the next probe starts only after both previous segment requests terminate. This costs up to four additional engine requests only when the baseline path exceeds twice the direct distance.
+The corridor integration regression uses exact coordinates captured by the planner logger. It calls the same `LocalPlanner.compare` used by production, requires a trajectory-safe local route substantially shorter than the 47.10-tile engine baseline, and then waits for the real follower to arrive. Legacy alternate probes remain only in the separate benchmark for historical comparison.
 
 The open-area regression reproduces a captured 18-waypoint zigzag and requires collision-mask-aware smoothing to reduce it to a direct two-point path with no reversal. Planner JSONL records engine and smoothed paths, per-candidate fractions, vias and distances, the selected candidate, corner counts, maximum turn angle, and reversal count.
 

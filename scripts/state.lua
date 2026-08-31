@@ -24,7 +24,6 @@ function State.get(player_index)
     recovery_waypoint_index = nil,
     recovery_attempts = 0,
     pending_request = nil,
-    pending_optimization = nil,
     next_command_id = 1,
     stuck_retries = 0,
     last_position = nil,

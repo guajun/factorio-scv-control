@@ -4,16 +4,31 @@ local Trajectory = require("scripts.trajectory")
 
 local PathSmoothing = {}
 
-local function translated_collision_box(character, position, clearance_margin)
+function PathSmoothing.collision_box(character, clearance_margin)
   local box = character.prototype.collision_box
+  clearance_margin = clearance_margin or 0
   return {
     left_top = {
-      x = position.x + box.left_top.x - clearance_margin,
-      y = position.y + box.left_top.y - clearance_margin
+      x = box.left_top.x - clearance_margin,
+      y = box.left_top.y - clearance_margin
     },
     right_bottom = {
-      x = position.x + box.right_bottom.x + clearance_margin,
-      y = position.y + box.right_bottom.y + clearance_margin
+      x = box.right_bottom.x + clearance_margin,
+      y = box.right_bottom.y + clearance_margin
+    }
+  }
+end
+
+local function translated_collision_box(character, position, clearance_margin)
+  local box = PathSmoothing.collision_box(character, clearance_margin)
+  return {
+    left_top = {
+      x = position.x + box.left_top.x,
+      y = position.y + box.left_top.y
+    },
+    right_bottom = {
+      x = position.x + box.right_bottom.x,
+      y = position.y + box.right_bottom.y
     }
   }
 end

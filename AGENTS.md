@@ -17,8 +17,9 @@ Use `-Suite smoke` for mod loading and lifecycle checks, `-Suite integration` fo
 ## Architecture
 
 - `control.lua` is the production event adapter and orchestrator.
-- `scripts/planner.lua` owns asynchronous engine requests and alternate candidate selection.
-- `scripts/path_math.lua` contains deterministic path metrics and alternate-route calculations.
+- `scripts/planner.lua` adapts asynchronous engine requests and delegates safe local comparison.
+- `scripts/local_planner.lua` compares validated engine paths with conservative local A* inside a baseline-length ellipse.
+- `scripts/path_math.lua` contains deterministic path metrics and legacy alternate-route calculations used by benchmarks.
 - `scripts/path_smoothing.lua` removes collision-safe grid corners and reports exact final paths.
 - `scripts/navigation_grid.lua` captures an inflated local collision snapshot for planner experiments.
 - `scripts/grid_search.lua` owns reusable A*, weighted A*, and Theta* graph search.
@@ -38,6 +39,8 @@ Keep pure or actor-agnostic behavior in modules under `scripts/` so the automate
 The automated scenario writes `script-output/scv-control/test-results.json` and logs `SCV_TESTKIT_COMPLETE passed=N failed=N`. The PowerShell runner watches this protocol, terminates only Factorio processes it started, returns a nonzero exit code on failure, and preserves the isolated test root when diagnostics are needed.
 
 The pathfinding benchmark writes `script-output/scv-control/pathfinding-benchmark.json` and logs `SCV_BENCH_COMPLETE passed=N failed=N`. `-Suite all` must run it after integration. Keep its fixture definitions shared with `/scv-test-bench`; never maintain a second GUI-only geometry.
+
+Record pathfinding experiments in `docs/pathfinding-experiments.md` with newest entries at the top. Preserve failed hypotheses, exact fixtures/metrics, and the decision they motivated; do not rewrite the log into a success-only narrative.
 
 Every regression fix should add or tighten an assertion in the automated scenario. Prefer exact fixture coordinates and bounded metrics over screenshots.
 

@@ -247,12 +247,15 @@ function Invoke-BenchmarkSuite {
   foreach ($fixture in $report.fixtures) {
     $metrics = foreach ($algorithm in @(
       'engine',
+      'production-local',
+      'engine-inflated',
       'engine-alternate',
       'engine-alternate-global',
       'grid-a-star',
       'grid-weighted-a-star-2',
       'grid-theta-star',
-      'grid-theta-star-exact'
+      'grid-theta-star-exact',
+      'safe-hybrid'
     )) {
       $result = $fixture.results.$algorithm
       if ($result.status -eq 'success') {
@@ -270,7 +273,12 @@ function Invoke-BenchmarkSuite {
     }
     else { '-' }
     $max = [math]::Round($summary.max_distance_ratio, 3)
-    Write-Host "[benchmark] summary $($summary.algorithm): solved=$($summary.solved_cases)/$($summary.expected_path_cases) mean/best=$mean max/best=$max expanded=$($summary.total_expanded_nodes) line/surface=$($summary.total_line_checks)/$($summary.total_surface_line_checks) requests=$($summary.total_requests) clearance-violations=$($summary.trajectory_clearance_violations)"
+    $safeMean = if ($null -ne $summary.mean_safe_distance_ratio) {
+      [math]::Round($summary.mean_safe_distance_ratio, 3)
+    }
+    else { '-' }
+    $safeMax = [math]::Round($summary.max_safe_distance_ratio, 3)
+    Write-Host "[benchmark] summary $($summary.algorithm): solved=$($summary.solved_cases)/$($summary.expected_path_cases) mean/best=$mean max/best=$max safe-mean/max=$safeMean/$safeMax expanded=$($summary.total_expanded_nodes) line/surface=$($summary.total_line_checks)/$($summary.total_surface_line_checks) requests=$($summary.total_requests) clearance-violations=$($summary.trajectory_clearance_violations)"
   }
   if ($report.failed -gt 0) {
     throw "Pathfinding benchmark failed: $($report.failed) failed, $($report.passed) passed. Report: $reportPath"

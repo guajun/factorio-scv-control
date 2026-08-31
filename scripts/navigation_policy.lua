@@ -19,7 +19,8 @@ local Policy = {
   },
   grid = {
     resolution = 0.5,
-    line_samples_per_cell = 2
+    line_samples_per_cell = 2,
+    max_local_nodes = 12000
   },
   follower = {
     min_waypoint_distance = 0.3,

@@ -10,28 +10,39 @@ local TIMEOUT_TICKS = 3600
 local PREVIEW_INTERFACE = "scv_pathfinding_preview"
 local PREVIEW_GUI_NAME = "scv_pathfinding_preview_frame"
 local PREVIEW_CLOSE_NAME = "scv_pathfinding_preview_close"
-local LIVE_MAX_GRID_NODES = 12000
+local STRICT_LAB_PLACEMENTS = {
+  {id = "captured-slalom-return", offset = {x = -54, y = 56}},
+  {id = "long-wall-return", offset = {x = 49, y = 56}},
+  {id = "u-trap", offset = {x = -4, y = 82}},
+  {id = "tight-clearance-corridor", offset = {x = 25, y = 82}}
+}
 
 local COLORS = {
   production = {r = 0.15, g = 0.55, b = 1, a = 0.95},
   engine = {r = 0.2, g = 0.65, b = 1, a = 0.8},
+  ["production-local"] = {r = 0.95, g = 0.2, b = 0.75, a = 0.95},
+  ["engine-inflated"] = {r = 0.15, g = 0.9, b = 0.55, a = 0.85},
   ["engine-alternate"] = {r = 0.1, g = 0.9, b = 0.9, a = 0.8},
   ["engine-alternate-global"] = {r = 0.2, g = 1, b = 0.35, a = 0.8},
   ["grid-a-star"] = {r = 1, g = 0.85, b = 0.15, a = 0.8},
   ["grid-weighted-a-star-2"] = {r = 1, g = 0.45, b = 0.1, a = 0.8},
   ["grid-theta-star"] = {r = 0.95, g = 0.3, b = 1, a = 0.8},
-  ["grid-theta-star-exact"] = {r = 1, g = 1, b = 1, a = 0.9}
+  ["grid-theta-star-exact"] = {r = 1, g = 1, b = 1, a = 0.9},
+  ["safe-hybrid"] = {r = 1, g = 0.25, b = 0.55, a = 0.95}
 }
 
 local LINE_STYLES = {
   production = {width = 5},
   engine = {width = 2},
+  ["production-local"] = {width = 5, dash_length = 2.8, gap_length = 0.25},
+  ["engine-inflated"] = {width = 3, dash_length = 1.4, gap_length = 0.25},
   ["engine-alternate"] = {width = 2, dash_length = 0.8, gap_length = 0.35},
   ["engine-alternate-global"] = {width = 4, dash_length = 1.6, gap_length = 0.4},
   ["grid-a-star"] = {width = 2, dash_length = 0.45, gap_length = 0.3},
   ["grid-weighted-a-star-2"] = {width = 2, dash_length = 1.2, gap_length = 0.6},
   ["grid-theta-star"] = {width = 3, dash_length = 2.2, gap_length = 0.45},
-  ["grid-theta-star-exact"] = {width = 3, dash_length = 0.25, gap_length = 0.25}
+  ["grid-theta-star-exact"] = {width = 3, dash_length = 0.25, gap_length = 0.25},
+  ["safe-hybrid"] = {width = 5, dash_length = 2.4, gap_length = 0.3}
 }
 
 local function visual_algorithms()
@@ -138,8 +149,8 @@ local function live_fixture(actor, payload)
   local height = math.max(1, bounds.max_y - bounds.min_y)
   local resolution = Benchmark.GRID_RESOLUTION
   local estimated_nodes = (width / resolution + 1) * (height / resolution + 1)
-  if estimated_nodes > LIVE_MAX_GRID_NODES then
-    local required = math.sqrt(width * height / LIVE_MAX_GRID_NODES)
+  if estimated_nodes > Policy.grid.max_local_nodes then
+    local required = math.sqrt(width * height / Policy.grid.max_local_nodes)
     resolution = math.ceil(required / Benchmark.GRID_RESOLUTION)
       * Benchmark.GRID_RESOLUTION
   end
@@ -195,7 +206,8 @@ local function ensure_surface()
   surface.request_to_generate_chunks({0, 0}, 3)
   surface.force_generate_chunk_requests()
   surface.freeze_daytime = true
-  surface.daytime = 0.5
+  surface.daytime = 0
+  surface.always_day = true
   surface.peaceful_mode = true
   return surface
 end
@@ -372,6 +384,9 @@ local function algorithm_summary(results)
       total_distance_ratio = 0,
       ratio_cases = 0,
       max_distance_ratio = 0,
+      total_safe_distance_ratio = 0,
+      safe_ratio_cases = 0,
+      max_safe_distance_ratio = 0,
       total_expanded_nodes = 0,
       total_line_checks = 0,
       total_surface_line_checks = 0,
@@ -382,11 +397,15 @@ local function algorithm_summary(results)
 
   for _, fixture_result in ipairs(results) do
     local best_distance = math.huge
+    local best_safe_distance = math.huge
     if fixture_result.expected_path then
       for _, algorithm in ipairs(Benchmark.ALGORITHMS) do
         local result = fixture_result.results[algorithm]
         if result and result.status == "success" then
           best_distance = math.min(best_distance, result.distance)
+          if result.trajectory_clearance_safe then
+            best_safe_distance = math.min(best_safe_distance, result.distance)
+          end
         end
       end
     end
@@ -410,6 +429,16 @@ local function algorithm_summary(results)
               result.distance_ratio_to_best
             )
           end
+          if result.trajectory_clearance_safe and best_safe_distance < math.huge then
+            result.distance_ratio_to_best_safe = result.distance / best_safe_distance
+            totals.total_safe_distance_ratio = totals.total_safe_distance_ratio
+              + result.distance_ratio_to_best_safe
+            totals.safe_ratio_cases = totals.safe_ratio_cases + 1
+            totals.max_safe_distance_ratio = math.max(
+              totals.max_safe_distance_ratio,
+              result.distance_ratio_to_best_safe
+            )
+          end
         elseif not fixture_result.expected_path and result.status == "no-path" then
           totals.correct_no_path_cases = totals.correct_no_path_cases + 1
         end
@@ -427,19 +456,38 @@ local function algorithm_summary(results)
     totals.mean_distance_ratio = totals.ratio_cases > 0
       and totals.total_distance_ratio / totals.ratio_cases
       or nil
+    totals.mean_safe_distance_ratio = totals.safe_ratio_cases > 0
+      and totals.total_safe_distance_ratio / totals.safe_ratio_cases
+      or nil
     totals.total_distance_ratio = nil
     totals.ratio_cases = nil
+    totals.total_safe_distance_ratio = nil
+    totals.safe_ratio_cases = nil
   end
   return summary
 end
 
 local function validate_fixture_result(suite, fixture_result)
+  local must_be_trajectory_safe = {
+    ["production-local"] = true,
+    ["engine-inflated"] = true,
+    ["grid-a-star"] = true,
+    ["grid-weighted-a-star-2"] = true,
+    ["grid-theta-star"] = true,
+    ["grid-theta-star-exact"] = true,
+    ["safe-hybrid"] = true
+  }
   for _, algorithm in ipairs(Benchmark.ALGORITHMS) do
     local result = fixture_result.results[algorithm]
     local passed = result ~= nil
       and ((fixture_result.expected_path
           and result.status == "success"
-          and result.actor_collision_safe)
+          and result.actor_collision_safe
+          and (not must_be_trajectory_safe[algorithm] or result.trajectory_clearance_safe))
+        or (fixture_result.expected_path
+          and fixture_result.allowed_no_path
+          and fixture_result.allowed_no_path[algorithm]
+          and result.status == "no-path")
         or (not fixture_result.expected_path and result.status == "no-path"))
     suite.assertions[#suite.assertions + 1] = {
       name = fixture_result.id .. "." .. algorithm,
@@ -473,6 +521,7 @@ local function validate_test_set(suite)
     "long-wall-return",
     "long-wall-enter",
     "narrow-corridor",
+    "tight-clearance-corridor",
     "u-trap",
     "slalom",
     "captured-slalom-return",
@@ -598,6 +647,7 @@ local function finish_active_fixture(suite)
     title = fixture.title,
     category = fixture.category,
     expected_path = fixture.expected_path,
+    allowed_no_path = fixture.allowed_no_path,
     start = fixture.start,
     goal = fixture.goal,
     completed_tick = game.tick,
@@ -731,7 +781,18 @@ end
 Runtime.add_remote_interface = function()
   if not interactive_mode() or remote.interfaces[PREVIEW_INTERFACE] then return end
   remote.add_interface(PREVIEW_INTERFACE, {
-    preview_plan = start_live_preview
+    preview_plan = start_live_preview,
+    build_strict_test_zones = function(surface_index)
+      local surface = game.get_surface(surface_index)
+      if not surface then return false end
+      for _, placement in ipairs(STRICT_LAB_PLACEMENTS) do
+        Fixtures.build_at(surface, Fixtures.get(placement.id), placement.offset, true)
+      end
+      surface.daytime = 0
+      surface.freeze_daytime = true
+      surface.always_day = true
+      return true
+    end
   })
 end
 

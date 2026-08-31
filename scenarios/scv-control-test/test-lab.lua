@@ -1,5 +1,6 @@
-local TEST_AREA = {{-52, -34}, {52, 36}}
+local TEST_AREA = {{-52, -34}, {52, 100}}
 local SPAWN = {x = 0, y = 0}
+local TEST_LAB_VERSION = 3
 
 local function automated_runner_active()
   return remote.interfaces["scv_test_runner"] ~= nil
@@ -55,6 +56,13 @@ local ZONES = {
     chart_text = "6 Context",
     position = {x = 9, y = 23},
     area = {{-2, 14}, {20, 33}},
+    targets = {}
+  },
+  {
+    name = {"scv-test.zone-strict-detours"},
+    chart_text = "7 Strict detours",
+    position = {x = 0, y = 68},
+    area = {{-52, 38}, {52, 98}},
     targets = {}
   }
 }
@@ -211,7 +219,7 @@ end
 
 local function build_test_lab()
   local surface = game.surfaces[1]
-  surface.request_to_generate_chunks(SPAWN, 3)
+  surface.request_to_generate_chunks(SPAWN, 4)
   surface.force_generate_chunk_requests()
   clear_test_area(surface)
 
@@ -226,6 +234,10 @@ local function build_test_lab()
   for _, zone in ipairs(ZONES) do
     draw_zone(surface, zone)
   end
+  local preview = remote.interfaces["scv_pathfinding_preview"]
+  if preview and preview.build_strict_test_zones then
+    remote.call("scv_pathfinding_preview", "build_strict_test_zones", surface.index)
+  end
 
   game.forces.player.set_spawn_position(SPAWN, surface)
   game.forces.player.chart(surface, TEST_AREA)
@@ -237,9 +249,11 @@ local function build_test_lab()
   end
 
   surface.freeze_daytime = true
-  surface.daytime = 0.5
+  surface.daytime = 0
+  surface.always_day = true
   surface.peaceful_mode = true
   storage.scv_test_lab_built = true
+  storage.scv_test_lab_version = TEST_LAB_VERSION
 end
 
 local function prepare_player(player)
@@ -278,7 +292,11 @@ end
 
 test_lab.on_configuration_changed = function()
   if not interactive_test_active() then return end
-  if not storage.scv_test_lab_built then
+  local surface = game.surfaces[1]
+  surface.daytime = 0
+  surface.freeze_daytime = true
+  surface.always_day = true
+  if storage.scv_test_lab_version ~= TEST_LAB_VERSION then
     build_test_lab()
   end
 end

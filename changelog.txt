@@ -18,7 +18,11 @@ Date: 29. 08. 2026
     - Added a shared nine-fixture pathfinding test set with headless JSON comparison reports and GUI rendering.
     - Added experimental A*, weighted A*, fast Theta*, and exact-collision Theta* benchmark adapters.
     - Added live multi-algorithm plan overlays, visibility controls, and structured comparison logs to the local TestKit.
-    - Centralized 28 production navigation constants in one documented policy module.
+    - Centralized 29 active and legacy navigation constants in one documented policy module.
+    - Added permanent daylight and a strict-detour zone backed by shared benchmark fixtures.
+    - Added inflated-engine and heuristic-free safe-hybrid planner experiments.
+    - Added a reverse-chronological pathfinding experiment and pitfall log.
+    - Replaced production alternate-via optimization with validated engine versus conservative local A* comparison.
   Bugfixes:
     - Fixed fast characters overshooting waypoints and repeatedly replanning around phantom obstacles.
     - Fixed old path renderings overlapping the current plan and appearing as a single detour.

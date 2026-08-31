@@ -12,6 +12,7 @@ SCV Control is an experimental Factorio 2.0 mod that replaces direct character m
 - The normal movement controls are consumed by the mod.
 - Right-clicks over GUI elements, entities, or while holding an item pass through to Factorio.
 - Pathfinding uses the current character's collision box and collision mask.
+- Production compares the fully validated engine route with a conservative local A* route; legacy alternate vias are benchmark-only.
 - Arbitrary path segments are followed through hysteresis-controlled decomposition into native movement directions.
 - Each player has an independent, configurable command queue.
 
@@ -22,6 +23,7 @@ This is an early prototype. Save before testing it in an important factory.
 - The mod load and lifecycle are tested locally on Factorio 2.0.77; interactive movement still needs broader gameplay testing.
 - Vehicle driving is not supported in this prototype because movement controls remain consumed while the mod is enabled.
 - Commands currently target empty ground only; context actions are planned for later versions.
+- Local navigation snapshots are rebuilt synchronously per plan; caching and world-change invalidation are not implemented yet.
 
 ## Installation
 
@@ -51,11 +53,14 @@ Use `/scv-test-bench list` in the developer save to list shared pathfinding fixt
 
 In the developer save, every normal completed move plan is also compared against enabled benchmark algorithms and drawn with a checkbox legend. Use `/scv-test-preview off` to disable this or `/scv-test-preview show` to reopen the panel. See the [navigation policy inventory](docs/navigation-policy.md) for all runtime tuning constants.
 
+Zone 7 contains stricter shared detour fixtures for long-wall, reverse-slalom, and U-trap behavior. The lab and benchmark surfaces use permanent daylight. Experimental conclusions and failed approaches are recorded newest-first in the [pathfinding experiment log](docs/pathfinding-experiments.md).
+
 ## Roadmap
 
 - Improve path following and recovery around dynamic obstacles.
 - Add persistent numbered queue markers.
 - Add context commands for mining, repairing, attacking, and entering vehicles.
+- Add [belt-aware navigation velocity and route costs](https://github.com/guajun/factorio-scv-control/issues/2).
 - Add an optional RTS/direct-control mode switch.
 - Add an SCV-style character prototype and original visual assets.
 - Add automated packaging and broader local integration checks.

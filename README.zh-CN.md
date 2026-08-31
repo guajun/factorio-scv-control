@@ -12,6 +12,7 @@ SCV Control 是一个面向 Factorio 2.0 的实验性 Mod，用 RTS 风格的鼠
 - Mod 会接管原版方向移动控制。
 - 鼠标位于 GUI 或实体上、手持物品时，右键操作会交还给原版游戏。
 - 寻路使用当前角色的碰撞箱和碰撞层。
+- 生产规划会比较完整校验后的引擎路线与保守局部 A*；旧 alternate via 仅保留在 benchmark 中。
 - 任意角度路径会通过带滞环的原生方向矢量分解来执行，减少逐 tick 扭头。
 - 每位玩家拥有独立且可配置的指令队列。
 
@@ -22,6 +23,7 @@ SCV Control 是一个面向 Factorio 2.0 的实验性 Mod，用 RTS 风格的鼠
 - 已在 Factorio 2.0.77 本地验证 Mod 加载和生命周期；交互移动仍需要更完整的实际游玩测试。
 - 当前版本接管方向键，因此暂不支持驾驶载具。
 - 目前只支持空地移动，采矿、维修、攻击和进入载具等情境指令尚未实现。
+- 局部导航快照目前每次规划都会同步重建，尚未实现缓存与世界变化的局部失效。
 
 ## 安装
 
@@ -51,11 +53,14 @@ pwsh -File .\tools\create-test-save.ps1 -Force
 
 开发存档中的每次普通移动规划完成后，也会运行已启用的 benchmark 算法并以 checkbox 图例叠加显示。使用 `/scv-test-preview off` 可关闭，`/scv-test-preview show` 可重新打开面板。所有运行时调参数见[导航策略清单](docs/navigation-policy.md)。
 
+第 7 区包含共享的严格绕路夹具，覆盖长墙、反向 slalom 和 U 型脱困；主测试场与 benchmark surface 都使用永久白天。实验结论与失败方案按倒序记录在[寻路实验日志](docs/pathfinding-experiments.md)。
+
 ## 路线图
 
 - 改进动态障碍附近的路径跟随和脱困逻辑。
 - 增加持续显示且带编号的队列标记。
 - 增加采矿、维修、攻击和进入载具等情境指令。
+- 增加[感知传送带速度与方向的路径成本](https://github.com/guajun/factorio-scv-control/issues/2)。
 - 增加 RTS/直接控制模式切换。
 - 增加原创 SCV 风格角色原型和视觉资源。
 - 增加自动打包和更完整的本地集成测试。

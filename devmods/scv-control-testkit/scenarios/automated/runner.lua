@@ -1,5 +1,6 @@
 local Follower = require("__factorio-scv-control__/scripts/follower")
 local Input = require("__factorio-scv-control__/scripts/input")
+local LocalPlanner = require("__factorio-scv-control__/scripts/local_planner")
 local PathMath = require("__factorio-scv-control__/scripts/path_math")
 local PathSmoothing = require("__factorio-scv-control__/scripts/path_smoothing")
 local Queue = require("__factorio-scv-control__/scripts/queue")
@@ -66,27 +67,6 @@ local function request_path(name, start_position, goal_position, character, expe
     expected_no_path = expected_no_path == true,
     character = character
   }
-end
-
-local function start_corridor_candidate(suite, candidate_index)
-  local candidate = suite.corridor.candidates[candidate_index]
-  if not candidate then return false end
-
-  candidate.segments = {}
-  suite.corridor.active_candidate_index = candidate_index
-  request_path(
-    "corridor-via-" .. candidate_index .. "-first",
-    START,
-    candidate.via,
-    suite.path_character
-  )
-  request_path(
-    "corridor-via-" .. candidate_index .. "-second",
-    candidate.via,
-    GOAL,
-    suite.path_character
-  )
-  return true
 end
 
 local function finish_if_complete()
@@ -162,7 +142,7 @@ script.on_init(function()
     open_done = false,
     trajectory_done = false,
     calibration_done = false,
-    corridor = {candidates = {}},
+    corridor = {},
     movement_queue = {queue = {}, active = nil, completed = {}},
     trajectory_test = {
       cases = {
@@ -333,86 +313,29 @@ script.on_event(defines.events.on_script_path_request_finished, function(event)
   elseif request.name == "corridor-baseline" then
     suite.corridor.baseline_path = path
     suite.corridor.baseline_distance = path_distance
-    local vias = PathMath.alternate_vias(
+    local comparison = LocalPlanner.compare(
       game.surfaces[1],
-      suite.path_character.name,
+      suite.path_character,
       START,
       GOAL,
       path
     )
-    expect("planner.corridor_finds_two_alternate_vias", #vias == 2, {
-      vias = vias,
-      baseline_path = path,
-      baseline_distance = path_distance
-    })
-    if #vias == 0 then
-      record("planner.corridor_selects_shorter_side", false, {
-        baseline_path = path,
-        baseline_distance = path_distance,
-        engine_path = engine_path,
-        engine_path_distance = PathMath.polyline_distance(START, engine_path)
+    expect("planner.corridor_local_path_is_safe",
+      comparison.grid_safe and comparison.source == "grid-a-star", {
+        source = comparison.source,
+        grid_safe = comparison.grid_safe,
+        grid_path = comparison.grid_path
       })
-      suite.corridor_done = true
-    else
-      for index, spec in ipairs(vias) do
-        suite.corridor.candidates[index] = {
-          fraction = spec.fraction,
-          via = PathMath.copy_position(spec.position)
-        }
-      end
-      start_corridor_candidate(suite, 1)
-    end
-  else
-    local candidate_index, segment_name = request.name:match("^corridor%-via%-(%d+)%-(%a+)$")
-    if candidate_index and (segment_name == "first" or segment_name == "second") then
-      candidate_index = tonumber(candidate_index)
-      local candidate = suite.corridor.candidates[candidate_index]
-      candidate.segments[segment_name == "first" and 1 or 2] = path
-    end
-  end
-
-  local active_index = suite.corridor.active_candidate_index
-  local active_candidate = active_index and suite.corridor.candidates[active_index] or nil
-  if active_candidate
-      and active_candidate.segments[1]
-      and active_candidate.segments[2]
-      and not active_candidate.completed
-      and not suite.corridor_done then
-    PathMath.complete_alternate_candidate(START, active_candidate)
-    active_candidate.completed = true
-    suite.corridor.active_candidate_index = nil
-    if start_corridor_candidate(suite, active_index + 1) then
-      finish_if_complete()
-      return
-    end
-
-    local baseline_distance = suite.corridor.baseline_distance
-    local selected_path, selected_distance, selected_index = PathMath.select_shortest_path(
-      suite.corridor.baseline_path,
-      baseline_distance,
-      suite.corridor.candidates
-    )
-    local near_probe = suite.corridor.candidates[1]
-    local far_probe = suite.corridor.candidates[2]
-    expect("planner.corridor_near_probe_beats_overshoot",
-      near_probe
-        and far_probe
-        and near_probe.fraction == 0.5
-        and far_probe.fraction == 0.75
-        and near_probe.distance + 0.5 < far_probe.distance,
-      {candidates = suite.corridor.candidates})
-    expect("planner.corridor_selects_shorter_side", selected_distance < baseline_distance * 0.85, {
-      baseline_distance = baseline_distance,
-      selected_distance = selected_distance,
-      selected_index = selected_index,
-      candidates = suite.corridor.candidates
-    })
-    expect("planner.corridor_candidate_bound", selected_distance < 34, {
-      selected_distance = selected_distance,
-      selected_index = selected_index
+    expect("planner.corridor_selects_shorter_side",
+      comparison.distance < path_distance * 0.7, {
+      baseline_path = path,
+      baseline_distance = path_distance,
+      selected_distance = comparison.distance,
+      selected_path = comparison.path,
+      expanded_nodes = comparison.expanded_nodes
     })
     suite.corridor.follow_state = {
-      path = selected_path,
+      path = comparison.path,
       waypoint_index = 1,
       segment_start = PathMath.copy_position(START)
     }
