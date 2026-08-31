@@ -6,6 +6,7 @@ local PathMath = require("__factorio-scv-control__/scripts/path_math")
 local PathSmoothing = require("__factorio-scv-control__/scripts/path_smoothing")
 local Queue = require("__factorio-scv-control__/scripts/queue")
 local Trajectory = require("__factorio-scv-control__/scripts/trajectory")
+local WorldTests = require("world_tests")
 
 local START = {x = -28.55078125, y = -0.12109375}
 local GOAL = {x = -30.12109375, y = -9.07421875}
@@ -80,7 +81,8 @@ local function finish_if_complete()
       or not suite.queue_done
       or not suite.open_done
       or not suite.trajectory_done
-      or not suite.calibration_done then
+      or not suite.calibration_done
+      or not suite.world_movement_done then
     return
   end
 
@@ -101,7 +103,7 @@ local function finish_if_complete()
   log("SCV_TESTKIT_COMPLETE passed=" .. suite.passed .. " failed=" .. suite.failed)
 end
 
-local function run_unit_tests()
+local function run_unit_tests(surface)
   NavigationContractTests.run(expect)
 
   expect("path_math.distance", PathMath.distance({x = 0, y = 0}, {x = 3, y = 4}) == 5)
@@ -127,6 +129,11 @@ local function run_unit_tests()
     and command.surface_index == 4
     and input_state.next_command_id == 8,
     {command = command, next_command_id = input_state.next_command_id})
+
+  for _, result in ipairs(WorldTests.run(surface)) do
+    expect(result.name, result.passed, result.details)
+  end
+  storage.scv_testkit.world_movement_test = WorldTests.start_movement(surface)
 end
 
 script.on_init(function()
@@ -145,6 +152,7 @@ script.on_init(function()
     open_done = false,
     trajectory_done = false,
     calibration_done = false,
+    world_movement_done = false,
     corridor = {},
     movement_queue = {queue = {}, active = nil, completed = {}},
     trajectory_test = {
@@ -250,7 +258,7 @@ script.on_init(function()
       start = start
     }
   end
-  run_unit_tests()
+  run_unit_tests(surface)
 end)
 
 script.on_event(defines.events.on_script_path_request_finished, function(event)
@@ -474,6 +482,7 @@ end
 script.on_event(defines.events.on_tick, function(event)
   local suite = storage.scv_testkit
   if suite.finished then return end
+  local surface = game.surfaces[1]
 
   local calibration = suite.motion_calibration
   local elapsed = event.tick - suite.started_tick
@@ -515,6 +524,15 @@ script.on_event(defines.events.on_tick, function(event)
       measured = measured
     })
     suite.calibration_done = true
+  end
+
+  if not suite.world_movement_done then
+    local result = WorldTests.update_movement(surface, suite.world_movement_test)
+    if result then
+      expect(result.name, result.passed, result.details)
+      suite.world_movement_done = true
+      suite.world_movement_test = nil
+    end
   end
 
   if not suite.requests_started and event.tick >= suite.started_tick + 60 then
@@ -628,6 +646,9 @@ script.on_event(defines.events.on_tick, function(event)
     if not suite.open_done then record("planner.open_path_smoothing", false, {status = "timeout"}) end
     if not suite.trajectory_done then record("trajectory.vector_decomposition_multi_angle", false, {status = "timeout"}) end
     if not suite.calibration_done then record("trajectory.direction_calibration", false, {status = "timeout"}) end
+    if not suite.world_movement_done then
+      record("navigation_world.live_transients_follow_ordinary_movement", false, {status = "timeout"})
+    end
     suite.follower_done = true
     suite.straight_done = true
     suite.corridor_done = true
@@ -636,6 +657,7 @@ script.on_event(defines.events.on_tick, function(event)
     suite.open_done = true
     suite.trajectory_done = true
     suite.calibration_done = true
+    suite.world_movement_done = true
     finish_if_complete()
   end
 end)
