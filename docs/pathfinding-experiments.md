@@ -4,6 +4,18 @@ New entries go at the top. Keep failed hypotheses and operational mistakes: the 
 
 Each entry should state the question, exact fixture/version, measured result, falsified assumption, and decision. Generated JSON remains the source of exact per-path data; this document records why the result changed the design.
 
+## 2026-09-01 - Late wall replanning cannot recover a safe production route
+
+**Question:** Does the current stuck-triggered replan recover after a wall is inserted ahead of a moving character when the episode uses the shared `production-v1` `PlanningRun`?
+
+**Fixture version:** NavigationEpisode fixture version 1, `wall-inserted-ahead`, start `(-12, 0)`, goal `(12, 0)`, and a wall from `(0, -8)` through `(0, 8)` on Factorio 2.0.77.
+
+**Measured result:** The initial run selected the 24-tile `engine-normal` route and predicted 107 travel ticks. The wall action fired 20 episode ticks after planning began. The character reached `(0.0078125, 0)`, detected stuck, and began its first replan 71 ticks after the action at an obstacle distance of `0.0078125`. On that production-equivalent replan, `engine-normal` returned a route that passed actor collision but failed trajectory-envelope validation; `engine-inflated` and `grid-a-star` both returned no-path. The selector terminated with `failed/no-safe-candidate`. Two isolated runs produced the same action, assertion, provider, and terminal ordering.
+
+**Falsified assumption:** The temporary single-engine episode adapter appeared to recover and arrive, but it bypassed the production candidate validation contract and accepted a route from a start already pressed against the new wall. That result was not production-equivalent evidence of dynamic-world recovery.
+
+**Decision:** Phase 1 records `failed/no-safe-candidate` as the semantic baseline and preserves its route, action, position, provider traces, and 71-tick replan latency. Corridor invalidation work in issue #11 must trigger replanning before contact; the episode runner must not add an eval-only proactive replan policy to manufacture an arrival.
+
 ## 2026-08-31 - Shared PlanningRun makes benchmark order production-equivalent
 
 **Question:** Can production and the static benchmark share candidate algorithms without also sharing the asynchronous request state machine?

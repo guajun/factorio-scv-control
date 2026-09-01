@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [ValidateSet("smoke", "integration", "benchmark", "all")]
+  [ValidateSet("smoke", "integration", "benchmark", "episodes", "all")]
   [string]$Suite = "all",
   [string]$FactorioExe = $env:FACTORIO_EXE,
   [int]$TimeoutSeconds = 90,
@@ -133,7 +133,6 @@ function Invoke-IntegrationSuite {
   } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $serverSettings -Encoding utf8NoBOM
 
   $port = Get-AvailableUdpPort
-  $startedAt = Get-Date
   $arguments = @(
     '--config', ('"{0}"' -f $Config),
     '--mod-directory', ('"{0}"' -f $Mods),
@@ -163,9 +162,6 @@ function Invoke-IntegrationSuite {
     }
   }
   finally {
-    Get-Process factorio -ErrorAction SilentlyContinue |
-      Where-Object { $_.StartTime -ge $startedAt.AddSeconds(-1) -and $_.Path -eq $Executable } |
-      Stop-Process -Force -ErrorAction SilentlyContinue
     if (-not $launcher.HasExited) { Stop-Process -Id $launcher.Id -Force -ErrorAction SilentlyContinue }
   }
 
@@ -197,7 +193,6 @@ function Invoke-BenchmarkSuite {
   } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $serverSettings -Encoding utf8NoBOM
 
   $port = Get-AvailableUdpPort
-  $startedAt = Get-Date
   $arguments = @(
     '--config', ('"{0}"' -f $Config),
     '--mod-directory', ('"{0}"' -f $Mods),
@@ -227,9 +222,6 @@ function Invoke-BenchmarkSuite {
     }
   }
   finally {
-    Get-Process factorio -ErrorAction SilentlyContinue |
-      Where-Object { $_.StartTime -ge $startedAt.AddSeconds(-1) -and $_.Path -eq $Executable } |
-      Stop-Process -Force -ErrorAction SilentlyContinue
     if (-not $launcher.HasExited) { Stop-Process -Id $launcher.Id -Force -ErrorAction SilentlyContinue }
   }
 
@@ -286,6 +278,95 @@ function Invoke-BenchmarkSuite {
   Write-Host "[benchmark] PASS: $($report.fixture_count) fixtures x $($report.algorithm_count) algorithms" -ForegroundColor Green
 }
 
+function Invoke-EpisodesSuite {
+  param([string]$Executable, [string]$Config, [string]$Mods, [string]$WriteData, [string]$Root)
+  $serverSettings = Join-Path $Root "episodes-server-settings.json"
+  @{
+    name = "SCV Control Navigation Episodes"
+    description = "Temporary local headless navigation episode server."
+    visibility = @{public = $false; lan = $false}
+    auto_pause = $false
+    autosave_interval = 0
+  } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $serverSettings -Encoding utf8NoBOM
+
+  $port = Get-AvailableUdpPort
+  $arguments = @(
+    '--config', ('"{0}"' -f $Config),
+    '--mod-directory', ('"{0}"' -f $Mods),
+    '--start-server-load-scenario', "$($testkitInfo.name)/navigation-episodes",
+    '--server-settings', ('"{0}"' -f $serverSettings),
+    '--port', "$port",
+    '--disable-audio'
+  )
+
+  Write-Host "[episodes] Starting navigation episodes on port $port" -ForegroundColor Cyan
+  $launcher = Start-Process -FilePath $Executable -ArgumentList $arguments -WindowStyle Hidden -PassThru
+  $logPath = Join-Path $WriteData "factorio-current.log"
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  $completionMatch = $null
+  try {
+    while ((Get-Date) -lt $deadline) {
+      Start-Sleep -Milliseconds 200
+      if ($launcher.HasExited) {
+        throw "Navigation episode Factorio process exited before completing. See $logPath"
+      }
+      if (-not (Test-Path -LiteralPath $logPath)) { continue }
+      $log = Get-Content -Raw -LiteralPath $logPath
+      $completionMatch = [regex]::Match(
+        $log,
+        "SCV_EPISODES_COMPLETE passed=(\d+) failed=(\d+)"
+      )
+      if ($completionMatch.Success) { break }
+      if ($log -match "non-recoverable error" -or $log -match "Error while running event") {
+        throw "Navigation episode scenario failed. See $logPath"
+      }
+    }
+  }
+  finally {
+    if (-not $launcher.HasExited) { Stop-Process -Id $launcher.Id -Force -ErrorAction SilentlyContinue }
+  }
+
+  if (-not $completionMatch -or -not $completionMatch.Success) {
+    throw "Navigation episode suite timed out after $TimeoutSeconds seconds. See $logPath"
+  }
+  $reportPath = Join-Path $WriteData "script-output\scv-control\navigation-episodes.json"
+  if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+    throw "Navigation episode suite completed without a JSON report. See $logPath"
+  }
+  $report = Get-Content -Raw -LiteralPath $reportPath | ConvertFrom-Json
+  $episodes = @($report.episodes)
+  if ($report.schema_version -ne 1 -or
+      $report.fixture_version -ne 1 -or
+      $report.episode_count -lt 3 -or
+      $report.episode_count -ne $episodes.Count -or
+      $report.passed + $report.failed -ne $report.episode_count -or
+      $null -ne $report.report_contract_errors) {
+    throw "Navigation episode report has an invalid contract. Report: $reportPath"
+  }
+  if ([int]$completionMatch.Groups[1].Value -ne $report.passed -or
+      [int]$completionMatch.Groups[2].Value -ne $report.failed) {
+    throw "Navigation episode completion marker does not match its report. Report: $reportPath"
+  }
+  foreach ($episode in $episodes) {
+    if ($episode.terminal_state -notin @("arrived", "no-path", "failed") -or
+        $episode.navigation_terminal.schema_version -ne 1 -or
+        $episode.navigation_terminal.status -ne $episode.terminal_state -or
+        @($episode.trace).Count -lt 1 -or
+        $null -eq $episode.last_position -or
+        $null -eq $episode.last_route -or
+        $null -eq $episode.last_action -or
+        $null -eq $episode.navigation_state) {
+      throw "Navigation episode '$($episode.id)' is missing terminal diagnostics. Report: $reportPath"
+    }
+    $label = if ($episode.passed) { "PASS" } else { "FAIL" }
+    Write-Host "[episodes] $label $($episode.id): terminal=$($episode.terminal_state) source=$($episode.source) routes=$($episode.metrics.route_count) replans=$($episode.metrics.replan_count)"
+  }
+  if ($report.failed -gt 0) {
+    throw "Navigation episode suite failed: $($report.failed) failed, $($report.passed) passed. Report: $reportPath"
+  }
+  Write-Host "[episodes] PASS: $($report.episode_count) episodes" -ForegroundColor Green
+}
+
 $factorio = Resolve-FactorioExecutable
 $actualVersion = (Get-Item -LiteralPath $factorio).VersionInfo.ProductVersion
 if ($actualVersion -notlike "$($info.factorio_version).*") {
@@ -334,6 +415,9 @@ enable-new-mods=true
   }
   if ($Suite -in @("benchmark", "all")) {
     Invoke-BenchmarkSuite $factorio $configPath $modsRoot $writeData $resolvedTestRoot
+  }
+  if ($Suite -in @("episodes", "all")) {
+    Invoke-EpisodesSuite $factorio $configPath $modsRoot $writeData $resolvedTestRoot
   }
   $failed = $false
   Write-Host "PASS: suite=$Suite Factorio=$actualVersion" -ForegroundColor Green
