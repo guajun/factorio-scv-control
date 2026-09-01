@@ -133,7 +133,6 @@ function Invoke-IntegrationSuite {
   } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $serverSettings -Encoding utf8NoBOM
 
   $port = Get-AvailableUdpPort
-  $startedAt = Get-Date
   $arguments = @(
     '--config', ('"{0}"' -f $Config),
     '--mod-directory', ('"{0}"' -f $Mods),
@@ -163,9 +162,6 @@ function Invoke-IntegrationSuite {
     }
   }
   finally {
-    Get-Process factorio -ErrorAction SilentlyContinue |
-      Where-Object { $_.StartTime -ge $startedAt.AddSeconds(-1) -and $_.Path -eq $Executable } |
-      Stop-Process -Force -ErrorAction SilentlyContinue
     if (-not $launcher.HasExited) { Stop-Process -Id $launcher.Id -Force -ErrorAction SilentlyContinue }
   }
 
@@ -197,7 +193,6 @@ function Invoke-BenchmarkSuite {
   } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $serverSettings -Encoding utf8NoBOM
 
   $port = Get-AvailableUdpPort
-  $startedAt = Get-Date
   $arguments = @(
     '--config', ('"{0}"' -f $Config),
     '--mod-directory', ('"{0}"' -f $Mods),
@@ -227,9 +222,6 @@ function Invoke-BenchmarkSuite {
     }
   }
   finally {
-    Get-Process factorio -ErrorAction SilentlyContinue |
-      Where-Object { $_.StartTime -ge $startedAt.AddSeconds(-1) -and $_.Path -eq $Executable } |
-      Stop-Process -Force -ErrorAction SilentlyContinue
     if (-not $launcher.HasExited) { Stop-Process -Id $launcher.Id -Force -ErrorAction SilentlyContinue }
   }
 
@@ -298,7 +290,6 @@ function Invoke-EpisodesSuite {
   } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $serverSettings -Encoding utf8NoBOM
 
   $port = Get-AvailableUdpPort
-  $startedAt = Get-Date
   $arguments = @(
     '--config', ('"{0}"' -f $Config),
     '--mod-directory', ('"{0}"' -f $Mods),
@@ -332,9 +323,6 @@ function Invoke-EpisodesSuite {
     }
   }
   finally {
-    Get-Process factorio -ErrorAction SilentlyContinue |
-      Where-Object { $_.StartTime -ge $startedAt.AddSeconds(-1) -and $_.Path -eq $Executable } |
-      Stop-Process -Force -ErrorAction SilentlyContinue
     if (-not $launcher.HasExited) { Stop-Process -Id $launcher.Id -Force -ErrorAction SilentlyContinue }
   }
 
