@@ -5,7 +5,9 @@ local Profiles = {}
 Profiles.DEFAULT_ID = "production-v1"
 
 local ordered = {
-  require("scripts.navigation.profiles.production_v1")
+  require("scripts.navigation.profiles.production_v1"),
+  require("scripts.navigation.profiles.interchange_distance_v1"),
+  require("scripts.navigation.profiles.external_distance_v1")
 }
 local by_id = {}
 for _, profile in ipairs(ordered) do

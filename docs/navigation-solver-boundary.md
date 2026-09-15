@@ -1,6 +1,18 @@
-# Navigation Solver Boundary (Design Draft)
+# Navigation Solver Boundary
 
-Status: proposed on 2026-09-15; no transport, exporter, backend, or wire validator is implemented by this document. This draft extends the [architecture plan](navigation-architecture-plan.md) and draws on [game navigation research](navigation-industry-research.md). The existing [Lua extension contract](navigation-extension-contract.md) remains the description of implemented schema version 1.
+Updated 2026-09-15. This document combines the target design with an explicitly scoped implementation checkpoint. It extends the [architecture plan](navigation-architecture-plan.md) and draws on [game navigation research](navigation-industry-research.md). The [Lua extension contract](navigation-extension-contract.md) describes concrete adapter APIs; requirements below the checkpoint remain targets unless included here.
+
+## Implemented subset and limits
+
+- `scripts/navigation/solver_boundary.lua`: `scv-navigation/1` snapshot/query/result checks, identities, objective units, finite bounds, capability checks, outcome preservation, and generation admission.
+- `navigation_data.lua`: committed captured-input generations with pin/release and staged, ordered delta commit/abort. This is not a Recast bake/update backend and is not wired into production world invalidation.
+- `canonical.lua` and `wire_json.lua`: cross-language exact binary64 value identity and JSON output. The Adler32 checksum is not a security digest. Empty plain Lua arrays/objects have one canonical empty representation.
+- `imported-route` and `external-route`: shared PlanningRun admission, collision/trajectory validation, distance scoring, selection, and native follower. External completion tokens cannot satisfy engine requests. Incomplete, budget, timeout and unsupported results cannot become successful arrival.
+- TestKit capture/replay exports fixture-v4 source geometry plus a declared conservative grid and exact endpoint connectors. Gates, belts, moving actors and unknown chunks are rejected by this static capture profile, not silently approximated as supported domains.
+- Python Dijkstra/A* solve the exported directed graph. Synthetic travel-time queries are supported offline; actual Factorio execution profiles accept distance only. No third-party library or navmesh adapter is implemented yet.
+- `/scv-nav-agent` and `tools/navigation/live.py` provide a fixed, chunked JSON RCON protocol for an isolated headless test lab. The current envelope uses `operation`, session nonce, request token and sequential chunk index; it is not a general-purpose RPC implementation of every logical operation below. GUI use is an explicit manual connection to that lab, not an automated client launch.
+
+See [testing](testing.md), the [live host guide](../tools/navigation/LIVE.md), and the newest [experiment log](pathfinding-experiments.md) for commands, actual evidence, and remaining lifecycle/performance limitations. Keep packages C (third-party topology) and E (real domains) open; do not claim they are completed by the reference graph solver.
 
 The boundary allows the same captured problem to be solved by Lua, an external graph library, or a navigation-mesh library, then evaluated in Factorio. Language and transport adapters implement one project contract; this is not an industry-standard protocol.
 
@@ -112,6 +124,13 @@ Offline import generates a data-only Lua module or companion-mod artifact before
 For live headless experiments, the host uses a fixed command handler with encoded data and `rcon.print` responses. Bound/chunk messages by negotiated limits and validate reassembly; never interpolate a solver-returned string as a Lua expression. Use isolated runner-owned server credentials and process handles. Transport loss or crash finishes as an explicit error/timeout and may activate the declared local fallback; it does not mark arrival.
 
 Do not hold open handles, sockets, or native library references in Factorio storage. On a live save/load or reconnect, rotate the external session identity, reconstruct world/backend state, and reissue only the still-current command. The exact supported lifecycle hooks and synchronized delivery must be proven by an integration test before live use.
+
+Factorio's `on_load` also runs on a joining multiplayer client. It must reconstruct
+the same Lua-local state from saved storage, not independently cancel work or mark
+that peer disconnected. Session rotation belongs to a synchronized host command.
+The installed 2.0.77 [data lifecycle documentation](https://lua-api.factorio.com/2.0.77/auxiliary/data-lifecycle.html)
+explicitly requires load/join equivalence. A headless server-only arrival test is
+not evidence that a second client can join without a desync.
 
 One authoritative host delivers external answers through Factorio's synchronized input/command path. Never let each multiplayer peer independently choose whichever sidecar answer arrives first. Log response admission tick and ordered messages; deterministic replay uses those recorded deliveries and does not depend on matching external wall-clock timing. Fresh-run timing variance remains a separate latency measurement.
 

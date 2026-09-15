@@ -2,20 +2,24 @@
 
 This plan turns SCV Control from a collection of named planner variants into a composable navigation system that can be evaluated headlessly against real Factorio behavior. The target is SC2-like responsiveness for one commanded character, not a claim to reproduce StarCraft II internals.
 
-Updated 2026-09-15 against main `852349a`. The [game navigation research](navigation-industry-research.md) records primary sources, design implications, and unrun experiments. The [external solver boundary](navigation-solver-boundary.md) specifies the proposed interchange and execution loop. Proposed interfaces in these documents are not implemented capabilities.
+Updated 2026-09-15: base main `852349a`, plus the `codex/navigation-framework` implementation. The [game navigation research](navigation-industry-research.md) records primary sources and design implications. The [external solver boundary](navigation-solver-boundary.md) distinguishes the implemented bounded subset from remaining target capabilities. Test evidence is recorded in the experiment log; unimplemented domain features are not implied by the new transport.
 
 ## Implementation checkpoint
 
-| Work | Main status | Remaining boundary |
+| Work | Implementation status | Remaining boundary |
 | --- | --- | --- |
 | Phase 0 contracts and registries ([#4](https://github.com/guajun/factorio-scv-control/issues/4)) | Merged in PR #13. | Version 1 describes the local Lua pipeline; it is not an external problem/response protocol. |
-| Shared PlanningRun ([#5](https://github.com/guajun/factorio-scv-control/issues/5)) | Merged in PR #15; production and production-profile benchmark share provider sequencing and validation. | Async completion is engine-oriented; query-time objective and NavigationData binding remain proposed. |
+| Shared PlanningRun ([#5](https://github.com/guajun/factorio-scv-control/issues/5)) | Merged in PR #15; framework adds separate external completion tokens, pinned queries, and per-provider capability checks. | Production retains its original profile. External profiles currently execute only static distance objectives. |
 | Headless episodes ([#6](https://github.com/guajun/factorio-scv-control/issues/6)) | Merged in PR #12; included in `-Suite all`. Shared PlanningRun and production Follower execute through an episode adapter. | Session orchestration is still adapter glue, not a fully extracted production NavigationSession. The inserted-wall case expects `failed/no-safe-candidate`; a passing suite does not demonstrate dynamic recovery. |
 | Incremental world ([#7](https://github.com/guajun/factorio-scv-control/issues/7)) | Module and engine-backed assertions merged in PR #14. | Regional cache/event handling is not wired into production planning. Derived-backend commit synchronization is a separate extension. |
 | Gates, belts, corridor invalidation | [#8](https://github.com/guajun/factorio-scv-control/issues/8), [#9](https://github.com/guajun/factorio-scv-control/issues/9), [#10](https://github.com/guajun/factorio-scv-control/issues/10), [#2](https://github.com/guajun/factorio-scv-control/issues/2), [#11](https://github.com/guajun/factorio-scv-control/issues/11) remain open. | Real-domain calibration and production composition remain required. |
-| External solver / new topology backend | Design only. | Export, wire validation, adapters, transport, replay, and performance comparisons are not yet implemented. |
+| External solver boundary | Framework adds `scv-navigation/1`, committed captured-input generations, exact JSON export, imported/external providers, and shared validation/follower replay. | NavigationData is not a mesh builder; its staged delta tests do not prove production-world cache integration. |
+| Solver comparison | Python Dijkstra and A* consume the same captured graph; the offline runner replays their results in Factorio. | These are reference graph algorithms, not a third-party navigation library. Recast/portal representation and full setup-cost comparisons remain follow-up work. |
+| Live test lab | Isolated loopback headless RCON host, chunked JSON delivery, fixture commands and GUI spectator adapter. | Test-map-only. Not ordinary-save right-click replacement, arbitrary dynamic-world solving, or production deployment. |
 
-This checkpoint describes inspected code and merged work, not a new test run. Historical measurements remain in the experiment log. The original Phase 0 merge barrier is satisfied; the additional boundary package below is a new, limited prerequisite for interchangeable search backends.
+The original Phase 0 merge barrier is satisfied. The framework implements the additional boundary prerequisite for interchangeable search backends; broader domain and lifecycle gates remain explicit. Consult the newest experiment-log entry for executed tests and unresolved failures rather than interpreting a source module's presence as validation.
+
+The next parallel packages are [#16 live cached queries, test-map input and GUI lifecycle](https://github.com/guajun/factorio-scv-control/issues/16) (user-selected first priority) and [#17 third-party topology comparison](https://github.com/guajun/factorio-scv-control/issues/17). Gate/belt calibration can continue independently. Keep live transport and topology implementations isolated; the integration owner alone changes common registries/reports/default profiles.
 
 ## Goals
 
@@ -95,7 +99,7 @@ Search receives traversability filters, conditional actions, objective ID/units,
 
 The current distance-based search ellipse cannot bound a longer-but-faster belt route. Travel-time profiles must use a justified time/speed bound or explicit bounded coverage, with incomplete coverage reported. Heuristic admissibility, budget/approximation, and post-processing must be declared per profile. A zero-heuristic search is the reference when a lower bound is unproven. Geometric smoothing must not discard a favorable belt or mandatory gate transition.
 
-Keep objective value, units, distance, predicted ticks, and measured ticks separate. Existing `PlanningRun` assigns the scalar score to `predicted.distance`; the integration owner must adapt this contract before adding a time scorer.
+Keep objective value, units, distance, predicted ticks, and measured ticks separate. The framework now recomputes geometric `predicted.distance` independently and records query score/units in `route.values.scored_objective`. A live time scorer and calibrated motion model are still required before enabling a travel-time execution profile.
 
 ### External solver and authoritative execution
 

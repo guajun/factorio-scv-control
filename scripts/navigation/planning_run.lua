@@ -67,6 +67,7 @@ local function finish(run, runtime, status, fields)
   run.status = status
   run.pending_request_id = nil
   run.pending_provider_id = nil
+  run.pending_kind = nil
   run.terminal_result = planning_result(run, status, fields)
   return run.terminal_result
 end
@@ -103,7 +104,12 @@ local function context(run, runtime, resolved)
     reason = run.reason,
     candidates = run.candidates,
     candidates_by_provider = candidates_by_provider(run),
-    request_path = runtime.request_path
+    request_path = runtime.request_path,
+    navigation_query = run.values and run.values.navigation_query,
+    navigation_data_ref = runtime.navigation_data_ref,
+    navigation_snapshot = runtime.navigation_snapshot,
+    solver_result = runtime.solver_result,
+    request_solver = runtime.request_solver
   }
 end
 
@@ -189,7 +195,18 @@ local function process_candidate(run, runtime, resolved, candidate)
   if not valid then return nil, validation_error end
   candidate.cost_result = cost_result
   if cost_result.status == "success" then
-    route.predicted.distance = cost_result.value
+    route.predicted.distance = PathMath.polyline_distance(run.start_position, route.points)
+    if cost_result.components and cost_result.components.travel_ticks ~= nil then
+      route.predicted.travel_ticks = cost_result.components.travel_ticks
+    end
+    if component_context.navigation_query then
+      route.values = route.values or {}
+      route.values.scored_objective = {
+        id = component_context.navigation_query.objective.id,
+        units = component_context.navigation_query.objective.units,
+        value = cost_result.value
+      }
+    end
   end
   append_trace(run, runtime, {
     event = "score",
@@ -247,6 +264,16 @@ local function select_route(run, runtime, resolved)
 end
 
 local function terminal_candidate(run, runtime, implementation, candidate)
+  local solver_outcome = candidate.values and candidate.values.solver_outcome
+  if solver_outcome and solver_outcome ~= "complete" then
+    local status = solver_outcome == "no-path" and "no-path"
+      or solver_outcome == "cancelled" and "cancelled" or "failed"
+    return finish(run, runtime, status, {
+      provider_id = candidate.provider_id,
+      reason = "solver-" .. solver_outcome,
+      values = {solver_outcome = solver_outcome, detail = candidate.values.reason}
+    })
+  end
   if candidate.status == "error" then
     return fail(run, runtime, "provider-error", {provider_id = candidate.provider_id})
   end
@@ -284,7 +311,7 @@ advance = function(run, runtime, resolved)
       status = "running"
     })
 
-    if implementation.kind == "async" then
+    if implementation.kind == "async" or implementation.kind == "external" then
       local request_id, request_error = call_component(
         run,
         runtime,
@@ -296,6 +323,7 @@ advance = function(run, runtime, resolved)
       if not request_id then return fail(run, runtime, request_error, {provider_id = provider_id}) end
       run.pending_request_id = request_id
       run.pending_provider_id = provider_id
+      run.pending_kind = implementation.kind
       run.request_count = run.request_count + 1
       append_trace(run, runtime, {
         event = "provider-request",
@@ -344,6 +372,21 @@ function PlanningRun.start(profile_reference, specification, runtime)
   local preflight, preflight_error = ProfileResolver.preflight(profile_reference)
   if not preflight then return nil, preflight_error end
 
+  local query = specification.navigation_query
+  local query_config = preflight.profile.config and preflight.profile.config.navigation_query
+  if query_config and query_config.required and not query then
+    return nil, {code = "missing-navigation-query", message = "Profile requires a navigation query."}
+  end
+  if query then
+    local query_preflight, detail = ProfileResolver.preflight_query(profile_reference, query)
+    if not query_preflight then return nil, detail end
+    if specification.start_position.x ~= query.start.x or specification.start_position.y ~= query.start.y
+        or specification.goal_position.x ~= query.goal.x or specification.goal_position.y ~= query.goal.y
+        or tostring(specification.command_id) ~= query.command_id then
+      return nil, {code = "query-command-mismatch", message = "Query and active command must agree."}
+    end
+  end
+
   local provider_order = {}
   for _, provider in ipairs(preflight.stages.candidate_providers) do
     provider_order[#provider_order + 1] = provider.id
@@ -367,6 +410,7 @@ function PlanningRun.start(profile_reference, specification, runtime)
     candidates = {},
     trace = {},
     status = "running",
+    values = query and {navigation_query = copy(query)} or nil,
     terminal_result = nil
   }
   append_trace(run, runtime, {
@@ -410,6 +454,13 @@ function PlanningRun.handle_result(run, event, runtime)
       finished_tick = tick(runtime)
     })
   end
+  if run.pending_kind == "external" and event.completion_kind ~= "external" then
+    return planning_result(run, "stale", {reason = "completion-kind-mismatch"})
+  end
+  if event.completion_kind == "external" and (run.pending_kind ~= "external"
+      or event.provider_id ~= run.pending_provider_id) then
+    return planning_result(run, "stale", {reason = "completion-provider-mismatch"})
+  end
 
   local resolved, resolution_error = resolve(run)
   if not resolved then return fail(run, runtime, resolution_error.message or "profile-resolution-failed") end
@@ -421,6 +472,7 @@ function PlanningRun.handle_result(run, event, runtime)
   local provider_id = run.pending_provider_id
   run.pending_request_id = nil
   run.pending_provider_id = nil
+  run.pending_kind = nil
   local candidate, provider_error = call_component(
     run,
     runtime,
@@ -441,6 +493,17 @@ function PlanningRun.handle_result(run, event, runtime)
   local terminal = terminal_candidate(run, runtime, component.implementation, recorded)
   if terminal then return terminal end
   return advance(run, runtime, resolved)
+end
+
+function PlanningRun.handle_solver_result(run, event, runtime)
+  event = copy(event)
+  event.completion_kind = "external"
+  return PlanningRun.handle_result(run, event, runtime)
+end
+
+function PlanningRun.fail_pending(run, reason, runtime)
+  if not run or run.status ~= "running" then return run and run.terminal_result or nil end
+  return fail(run, runtime or {}, reason or "solver-transport-error")
 end
 
 function PlanningRun.cancel(run, reason, runtime)

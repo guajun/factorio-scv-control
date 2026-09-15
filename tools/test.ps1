@@ -1,8 +1,9 @@
 [CmdletBinding()]
 param(
-  [ValidateSet("smoke", "integration", "benchmark", "episodes", "all")]
+  [ValidateSet("smoke", "integration", "benchmark", "episodes", "interchange", "live", "all")]
   [string]$Suite = "all",
   [string]$FactorioExe = $env:FACTORIO_EXE,
+  [string]$PythonExe = "python",
   [int]$TimeoutSeconds = 90,
   [switch]$KeepArtifacts
 )
@@ -122,7 +123,10 @@ function Invoke-SmokeSuite {
 }
 
 function Invoke-IntegrationSuite {
-  param([string]$Executable, [string]$Config, [string]$Mods, [string]$WriteData, [string]$Root)
+  param([string]$Executable, [string]$Config, [string]$Mods, [string]$WriteData, [string]$Root,
+    [string]$Mode = "integration")
+  $scenarioName = if ($Mode -eq "interchange") { "navigation-interchange" } else { "automated" }
+  $completionMarker = if ($Mode -eq "interchange") { "SCV_INTERCHANGE_COMPLETE" } else { "SCV_TESTKIT_COMPLETE" }
   $serverSettings = Join-Path $Root "server-settings.json"
   @{
     name = "SCV Control Agent Test"
@@ -136,13 +140,13 @@ function Invoke-IntegrationSuite {
   $arguments = @(
     '--config', ('"{0}"' -f $Config),
     '--mod-directory', ('"{0}"' -f $Mods),
-    '--start-server-load-scenario', "$($testkitInfo.name)/automated",
+    '--start-server-load-scenario', "$($testkitInfo.name)/$scenarioName",
     '--server-settings', ('"{0}"' -f $serverSettings),
     '--port', "$port",
     '--disable-audio'
   )
 
-  Write-Host "[integration] Starting automated scenario on port $port" -ForegroundColor Cyan
+  Write-Host "[$Mode] Starting $scenarioName scenario on port $port" -ForegroundColor Cyan
   $launcher = Start-Process -FilePath $Executable -ArgumentList $arguments -WindowStyle Hidden -PassThru
   $logPath = Join-Path $WriteData "factorio-current.log"
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
@@ -155,7 +159,7 @@ function Invoke-IntegrationSuite {
       }
       if (-not (Test-Path -LiteralPath $logPath)) { continue }
       $log = Get-Content -Raw -LiteralPath $logPath
-      if ($log -match "SCV_TESTKIT_COMPLETE") { $completed = $true; break }
+      if ($log -match $completionMarker) { $completed = $true; break }
       if ($log -match "non-recoverable error" -or $log -match "Error while running event") {
         throw "Integration scenario failed. See $logPath"
       }
@@ -166,19 +170,21 @@ function Invoke-IntegrationSuite {
   }
 
   if (-not $completed) { throw "Integration suite timed out after $TimeoutSeconds seconds. See $logPath" }
-  $reportPath = Join-Path $WriteData "script-output\scv-control\test-results.json"
+  $reportRelative = if ($Mode -eq "interchange") { "script-output\scv-control\navigation\interchange-results.json" }
+    else { "script-output\scv-control\test-results.json" }
+  $reportPath = Join-Path $WriteData $reportRelative
   if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
     throw "Integration suite completed without a JSON report. See $logPath"
   }
   $report = Get-Content -Raw -LiteralPath $reportPath | ConvertFrom-Json
   foreach ($result in $report.results) {
     $label = if ($result.passed) { "PASS" } else { "FAIL" }
-    Write-Host "[integration] $label $($result.name)"
+    Write-Host "[$Mode] $label $($result.name)"
   }
   if ($report.failed -gt 0) {
     throw "Integration suite failed: $($report.failed) failed, $($report.passed) passed. Report: $reportPath"
   }
-  Write-Host "[integration] PASS: $($report.passed) assertions" -ForegroundColor Green
+  Write-Host "[$Mode] PASS: $($report.passed) assertions" -ForegroundColor Green
 }
 
 function Invoke-BenchmarkSuite {
@@ -418,6 +424,19 @@ enable-new-mods=true
   }
   if ($Suite -in @("episodes", "all")) {
     Invoke-EpisodesSuite $factorio $configPath $modsRoot $writeData $resolvedTestRoot
+  }
+  if ($Suite -in @("interchange", "all")) {
+    Invoke-IntegrationSuite $factorio $configPath $modsRoot $writeData $resolvedTestRoot "interchange"
+  }
+  if ($Suite -eq "all") {
+    Write-Host "[solver] Running host protocol and graph-search conformance tests" -ForegroundColor Cyan
+    & $PythonExe -m unittest discover -s (Join-Path $projectRoot "tools/navigation") -p "test_*.py" -v
+    if ($LASTEXITCODE -ne 0) { throw "External solver conformance tests failed." }
+  }
+  if ($Suite -in @("live", "all")) {
+    Write-Host "[live] Running isolated external solver/native follower loop" -ForegroundColor Cyan
+    & $PythonExe (Join-Path $projectRoot "tools/navigation/live.py") --test --factorio-exe $factorio --timeout $TimeoutSeconds
+    if ($LASTEXITCODE -ne 0) { throw "Live external solver headless tests failed." }
   }
   $failed = $false
   Write-Host "PASS: suite=$Suite Factorio=$actualVersion" -ForegroundColor Green

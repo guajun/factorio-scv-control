@@ -28,9 +28,20 @@ Available suites:
 | `smoke` | Loads settings/data/control stages and exits after Factorio successfully creates a map. |
 | `integration` | Runs deterministic engine-backed tasks until planning, character movement, queue execution, and failure cases actually complete. |
 | `benchmark` | Runs the shared pathfinding test set against engine, alternate, A*, weighted A*, and Theta* variants. |
-| `all` | Runs smoke, integration, and benchmark. This is the required pre-commit command. |
+| `episodes` | Shared PlanningRun and follower in condition-driven episodes, including the known inserted-wall failure baseline. |
+| `interchange` | Bounded fixture capture, query/hash conformance, import rejection, and actual follower replay. |
+| `live` | Starts the isolated loopback headless/RCON lab and asserts external result delivery, native arrival and lifecycle rejection. |
+| `all` | Runs smoke, integration, benchmark, episodes, interchange, Python conformance and the live headless loop. This is the required pre-commit command. |
 
-Use `-Verbose` for Factorio stdout. Successful runs clean their temporary directory. Failures retain it and print its path; `-KeepArtifacts` retains successful artifacts as well.
+Use `-Verbose` for Factorio stdout. Successful regular suites clean their temporary directory. Failures retain it and print its path; `-KeepArtifacts` retains successful artifacts as well. The separate live host retains its own report/work artifacts and prints that additional root.
+
+Host conformance needs Python 3.10+ (`-PythonExe` selects the executable). The normal mod has no Python dependency. The full offline comparison is:
+
+```powershell
+pwsh -NoProfile -File .\tools\navigation\eval.ps1 -KeepArtifacts
+```
+
+This captures the shared fixture-v4 catalog, runs Dijkstra and A* against identical exported graphs, and executes both result sets in fresh headless Factorio instances. Generated import modules are written only into a temporary project copy. The manifest identifies every capture, solver, and replay artifact. Runtime and lifecycle failures retain diagnostics. No command above launches a graphical client.
 
 ## Reports
 
@@ -50,6 +61,17 @@ SCV_TESTKIT_COMPLETE passed=N failed=N
 The external runner treats missing reports, timeouts, Lua errors, and failed assertions as nonzero exits.
 
 The benchmark scenario writes `script-output/scv-control/pathfinding-benchmark.json` and `SCV_BENCH_COMPLETE passed=N failed=N`. See [pathfinding benchmark](pathfinding-benchmark.md) for fixtures, metrics, current results, and interactive commands. See [navigation policy](navigation-policy.md) for the complete hardcoded-parameter inventory.
+
+Interchange writes `script-output/scv-control/navigation/interchange-results.json` and `SCV_INTERCHANGE_COMPLETE passed=N failed=N`. Source captures and raw/final replay routes live beside that report. GUI commands `/scv-nav-capture` and `/scv-nav-replay` consume the same code; see [capture and replay](../devmods/scv-control-testkit/interchange/README.md).
+
+`-Suite live` runs an isolated loopback RCON server plus the Python solver and
+waits for native arrival, duplicate rejection, cancellation and session replacement.
+It is also part of `-Suite all`. Its independent retained artifact root contains
+`live-report.json`, exact work/result values and `rpc-trace.jsonl`. The default
+suite never launches the generated manual GUI client script. See the
+[live host guide](../tools/navigation/LIVE.md) for connecting a client with matching
+mod copies. A manual two-peer connection/desync test is not implied by a passing
+headless transport test.
 
 Pathfinding experiments and failures are recorded newest-first in [the experiment log](pathfinding-experiments.md). Add an entry whenever an experiment changes a planner assumption, even if no production code is selected.
 

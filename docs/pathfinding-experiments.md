@@ -4,6 +4,41 @@ New entries go at the top. Keep failed hypotheses and operational mistakes: the 
 
 Each entry should state the question, exact fixture/version, measured result, falsified assumption, and decision. Generated JSON remains the source of exact per-path data; this document records why the result changed the design.
 
+## 2026-09-15 - External solver boundary reaches native execution; transport remains expensive
+
+**Question:** Can an external solver consume the same exact captured problem, return through production validation, and finish real character movement without launching a GUI?
+
+**Scope:** Factorio 2.0.77, fixture version 4, `scv-navigation/1`, `factorio-captured-grid-v1` at 0.5 tiles, Python standard-library Dijkstra/A*. These are reference graph implementations, not a Recast/Detour experiment. Production stays `production-v1`. Actual gates/belts/moving actors are explicitly unsupported by static capture; the historical `gate-open`/`gate-closed` fixtures remain wall-gap geometry.
+
+**Measured results:** Both external algorithms solved the identical 11-case capture with 10 `complete` and one graph-scoped `no-path`. All ten complete results passed the shared collision/trajectory validators and arrived under the native Follower in separate Factorio replays. Every per-case distance matched within `1e-8` tiles. Representative raw graph paths:
+
+| Fixture | Distance (tiles) | Dijkstra expansions | A* expansions |
+| --- | ---: | ---: | ---: |
+| `open-diagonal` | 27.784888 | 3,733 | 2 |
+| `long-wall-return` | 28.253505 | 1,659 | 429 |
+| `tight-clearance-corridor` | 23.219122 | 236 | 195 |
+| `captured-slalom-return` | 38.358487 | 1,702 | 1,134 |
+| `unreachable-box` | no-path | 2,369 | 2,369 |
+
+The raw imported paths are intentionally not geometrically smoothed. `tight` still takes the conservative-grid detour: 23.2191 is worse than the historical production inflated-engine result around 20.17. The Python language boundary does not recover clearance erased by the graph representation. Original source geometry is retained for a genuinely different topology backend.
+
+The loopback headless/RCON probe admitted one result, rejected duplicate/cancelled/prior-session replies, and moved `open-diagonal` to arrival in **133 movement ticks**, error **0.311326 tiles**, actual travel **29.463282 tiles**. Its existing speed-dependent follower bound is **0.3375 tiles**; the solver endpoint eligibility radius remains **0.25 tiles**. These are separate contracts. The first host assertion incorrectly conflated them; capture now pins both before search, and replay rejects any imported execution bound that differs from `Follower.tolerance(actor)`. Neither controller tuning nor endpoint assertion was adjusted to the observed error.
+
+The live fixture snapshot needed **1,128 RCON chunks** at 3,000 payload bytes each. Transfer took **18.225 seconds**, while the measured solver call (including graph validation/hash/setup) took **1.452 seconds**. This establishes a functional live loop, not low-latency RTS interaction. Capture remains synchronous. Cached committed generations, bounded capture work and avoiding repeated whole-world transfer are the next priorities, not another search heuristic.
+
+**Failed hypotheses retained:**
+
+- A 200k-value canonical limit rejected four real fixture graphs; export preserved all failures instead of silently dropping cases. The bounded canonical limit is now one million values/8 MiB per value, while multi-case JSON has a separate limit.
+- Publishing fixture metadata through a second generation, encoding the full bundle twice and retaining every graph caused an `on_init` watchdog failure at 180 seconds. Single publication, per-fixture encode/check and bounded retained working data reduced a diagnostic run to 46.4 seconds. The default 90-second per-suite watchdog was not enlarged; success still requires semantic completion.
+- Factorio's JSON writer and patched `string.format("%.17g")` can round `0.15 * 1.5` from `0.22499999999999998` to `0.225`. Even `%.0f` rounded a large canonical mantissa. Local Lua tests alone missed the engine-specific formatting behavior. Integer-digit canonical encoding and exact decimal expansion now preserve the binary64 value, with fixed Python vectors and actual Factorio round-trip tests. Old broken captures must be re-exported.
+- A Lua-local `needs handshake` flag reset by `on_load` would let a newly joining client cancel a request the host still executes. Session state is now synchronized storage; only the host command rotates it. The headless contract test exercises load-hook invariance. A real second-client/desync test remains unrun.
+
+**Reproduction:** `pwsh -NoProfile -File .\tools\test.ps1 -Suite all` includes smoke, 104 integration assertions, the existing static benchmark, three production-equivalent episodes, capture/replay conformance, 29 Python tests, and six live headless assertions. `tools/navigation/eval.ps1 -KeepArtifacts` separately captures once and imports both solver bundles through isolated Factorio replays. The dynamic `wall-inserted-ahead` episode still expects the known `failed/no-safe-candidate` outcome; passing that baseline is not dynamic recovery.
+
+The first full comparison artifacts are under local `scv-navigation-eval-861abda7e5414edd947603809de2ff66`; the final explicit-execution-contract rerun also passes at `scv-navigation-eval-1c60eea8eb574482be790771e5c5dd97` (33 replay assertions per algorithm). The measured live transport run is `factorio-scv-live-sv1b9q07`; final `all` artifacts are `factorio-scv-agent-test-665c098a4e07404a97d3da1780c5159c` plus `factorio-scv-live-jnt2lm91`. All are under the runner's printed temporary directory. Generated manifests include source/query identity and full replay paths; these machine-specific locations are diagnostic evidence, not checked-in inputs.
+
+**Decision and follow-up:** Keep the implemented boundary and native execution loop, preserve production behavior, and prioritize [live caching/GUI lifecycle #16](https://github.com/guajun/factorio-scv-control/issues/16). Compare a real source-geometry topology backend in [#17](https://github.com/guajun/factorio-scv-control/issues/17). GUI launch remains manual with an isolated matching-mod profile. No ordinary save, existing GUI mod junction, or graphical process was changed by these tests. Real domains remain the existing gate/belt/invalidation issues.
+
 ## 2026-09-15 - Industry research exposes objective and backend boundaries
 
 **Question:** Can external game-navigation libraries fit the composable pipeline, and is a serialized polyline plus final cost scoring a sufficient contract?

@@ -16,6 +16,12 @@ Use `-Suite smoke` for mod loading and lifecycle checks, `-Suite integration` fo
 
 ## Architecture
 
+- `scripts/navigation/planning_run.lua` is the shared production/eval acceptance state machine. Keep `production-v1` provider order and route selection reproducible.
+- `scripts/navigation/solver_boundary.lua` validates the versioned external query/result envelope and per-provider query capabilities. Import outcomes remain distinct from episode arrival.
+- `scripts/navigation/navigation_data.lua` manages committed captured-input generations and staged deltas; it is not a navmesh baker. Store only serializable values and release pinned generations.
+- `scripts/navigation/canonical.lua` defines shared Lua/Python input identity. Change encoding or bounds only with cross-language conformance assertions.
+- `devmods/scv-control-testkit/interchange` owns bounded fixture/live capture and shared-planner/native-follower replay. External routes never bypass the production validators.
+- `tools/navigation` owns external host tooling; normal mod loading must not depend on Python or a running service.
 - `control.lua` is the production event adapter and orchestrator.
 - `scripts/planner.lua` adapts asynchronous engine requests and delegates safe local comparison.
 - `scripts/local_planner.lua` compares validated engine paths with conservative local A* inside a baseline-length ellipse.
@@ -39,6 +45,10 @@ Keep pure or actor-agnostic behavior in modules under `scripts/` so the automate
 The automated scenario writes `script-output/scv-control/test-results.json` and logs `SCV_TESTKIT_COMPLETE passed=N failed=N`. The PowerShell runner watches this protocol, terminates only Factorio processes it started, returns a nonzero exit code on failure, and preserves the isolated test root when diagnostics are needed.
 
 The pathfinding benchmark writes `script-output/scv-control/pathfinding-benchmark.json` and logs `SCV_BENCH_COMPLETE passed=N failed=N`. `-Suite all` must run it after integration. Keep its fixture definitions shared with `/scv-test-bench`; never maintain a second GUI-only geometry.
+
+`-Suite interchange` runs bounded capture and imported-route execution in its own headless scenario so export work does not perturb the production benchmark's engine request order. Its report is `script-output/scv-control/navigation/interchange-results.json` and its terminal marker is `SCV_INTERCHANGE_COMPLETE passed=N failed=N`. The default `all` suite includes it. `tools/navigation/eval.ps1` performs the full offline export -> external solve -> Factorio replay comparison using an isolated project copy; never overwrite the user's imported catalog from automated evaluation.
+
+`-Suite live` (also in `all`) launches `tools/navigation/live.py --test`: an isolated loopback headless server plus Python solver, with actual native arrival and protocol lifecycle checks. The host retains its own artifact root and emits `SCV_LIVE_COMPLETE passed=N failed=N`. It must never run its generated manual GUI launcher automatically. Keep multiplayer session state synchronized; `on_load` also runs on a newly joining client and cannot invent a local cancellation.
 
 Record pathfinding experiments in `docs/pathfinding-experiments.md` with newest entries at the top. Preserve failed hypotheses, exact fixtures/metrics, and the decision they motivated; do not rewrite the log into a success-only narrative.
 
