@@ -47,6 +47,8 @@ The [saved-map testbench](docs/save-backed-testbench.md) retains openable source
 
 Navigation profile schemas, registry ownership, capability validation, and storage boundaries are documented in the [navigation extension contract](docs/navigation-extension-contract.md).
 
+The [saved solver comparison](docs/saved-solver-comparison.md) adds eleven static source maps and a 44-row native matrix for production-v1, grid A*, Dijkstra and source polygons. Run `tools/test.ps1 -Suite compare`; the default `all` suite includes it and requires the documented pinned topology-worker environment. Reports separate accepted distance, actual movement, map construction, solver queries and transport/admission time.
+
 Create or refresh the interactive test save with:
 
 ```powershell

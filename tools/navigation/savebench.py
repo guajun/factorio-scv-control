@@ -158,7 +158,8 @@ def rpc(client: Rcon, operation: str, **fields: object) -> dict:
 
 
 @contextmanager
-def server(binary: Path, mods: Path, artifact: Path, timeout: float, save: Path | None = None):
+def server(binary: Path, mods: Path, artifact: Path, timeout: float, save: Path | None = None,
+           *, scenario: str = "scv-control-testkit/navigation-savebench", ready=None):
     artifact.mkdir(parents=True)
     data = artifact / "write-data"
     (data / "saves").mkdir(parents=True)
@@ -171,7 +172,7 @@ def server(binary: Path, mods: Path, artifact: Path, timeout: float, save: Path 
     rcon_port, password = free_port(socket.SOCK_STREAM), secrets.token_urlsafe(32)
     arguments = [str(binary), "--config", str(config), "--mod-directory", str(mods)]
     arguments += (["--start-server", str(save)] if save else
-                  ["--start-server-load-scenario", "scv-control-testkit/navigation-savebench", "--map-gen-seed", "424242"])
+                  ["--start-server-load-scenario", scenario, "--map-gen-seed", "424242"])
     arguments += ["--server-settings", str(settings), "--bind", "127.0.0.1:" + str(free_port(socket.SOCK_DGRAM)),
                   "--rcon-bind", "127.0.0.1:" + str(rcon_port), "--rcon-password", password, "--disable-audio"]
     client = None
@@ -184,7 +185,7 @@ def server(binary: Path, mods: Path, artifact: Path, timeout: float, save: Path 
                     raise RconError("saved-map server exited; see " + str(artifact))
                 try:
                     client = Rcon("127.0.0.1", rcon_port, password, timeout=min(timeout, 10))
-                    rpc(client, "status")
+                    (ready or (lambda connection: rpc(connection, "status")))(client)
                     break
                 except (OSError, RconError):
                     if client:
