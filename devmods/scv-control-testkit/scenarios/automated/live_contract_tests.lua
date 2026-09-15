@@ -11,6 +11,11 @@ function Tests.run(expect)
   remote.add_interface("scv_navigation_live", {active = function() return true end})
   local first = call("capabilities", {nonce = "headless-contract-session"})
   expect("live.synchronized-handshake", first.ok == true and first.handshake_required == false)
+  expect("live.bulk-file-is-default", first.snapshot_transport == "file")
+  local changed = call("capabilities", {nonce = "headless-contract-session", snapshot_transport = "rcon"})
+  expect("live.transport-cannot-change-within-session", changed.reason == "transport-change-requires-fresh-session")
+  local unsupported = call("capabilities", {nonce = "headless-contract-session", snapshot_transport = "shared-memory"})
+  expect("live.unsupported-transport-is-explicit", unsupported.reason == "unsupported-snapshot-transport")
   local state = storage.scv_navigation_live
   state.request = {status = "pending", token = "pending-before-peer-load", pending_tick = game.tick,
     upload = {}, upload_next_index = 1, upload_bytes = 0}

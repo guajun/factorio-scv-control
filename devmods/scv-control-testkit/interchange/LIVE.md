@@ -12,10 +12,10 @@ Use the version-preserving wire JSON encoder for numeric fields.
 
 | Operation | Additional request fields | Result |
 | --- | --- | --- |
-| `capabilities` | optional fresh ASCII `nonce` (8–128 letters/digits/hyphen/underscore) | With nonce, establish `session_id`; return `handshake_required`, `chunk_bytes`, limits and capabilities. Without nonce, inspect only. |
+| `capabilities` | optional fresh ASCII `nonce` (8–128 letters/digits/hyphen/underscore), `snapshot_transport` (`file` default or `rcon`) | With nonce, establish `session_id`; return transport selection/support, `handshake_required`, `chunk_bytes`, limits and capabilities. A transport change requires a fresh session. Without nonce, inspect only. |
 | `begin` | `session_id`, `fixture_id` | Queue one shared fixture-v4 case; return `request_token`. Capture starts on the next tick. |
-| `poll` | `session_id`, optional `request_token` | Current status, work byte/chunk counts, query identity, or terminal summary. A host service can claim GUI-started pending requests here. |
-| `download` | `session_id`, `request_token`, zero-based byte `offset`, `max_bytes <= chunk_bytes` | `{data, next_offset, eof, bytes}`. Joined chunks are a `live-work` JSON object with `snapshot` and `query`. |
+| `poll` | `session_id`, optional `request_token` | Current status, work byte/chunk counts, query identity, or terminal summary. File-mode pending work includes `transfer`: fixed relative path, bytes, token/session, query ID/hash and snapshot hash. |
+| `download` | `session_id`, `request_token`, zero-based byte `offset`, `max_bytes <= chunk_bytes` | Legacy/diagnostic channel: `{data, next_offset, eof, bytes}`. Joined chunks are the exact same `live-work` JSON as the bulk file. The default host does not use it. |
 | `upload` | `session_id`, `request_token`, one-based `index`, ASCII `data` | Sequential upload acknowledgement. Identical duplicate chunks are idempotent; conflicting duplicates/reordering reject. Total payload is bounded at 1 MiB. |
 | `commit` | `session_id`, `request_token`, optional `total_chunks` | Parse assembled `solver-result` JSON and deliver exactly once to shared `PlanningRun.handle_solver_result`. |
 | `cancel` | `session_id`, `request_token` | Stop the actor, cancel the shared planning run and invalidate upload state. |
@@ -31,10 +31,15 @@ and logged with `SCV_NAV_LIVE_TERMINAL`. The report retains the raw external res
 shared final planning result, actor movement measurements and request identity.
 Transport wait and movement ticks are failure guards, never success conditions.
 
-Loading/reloading requires a new host nonce. `on_load` mutates only a local flag;
-the next tick stops obsolete movement. The handshake cancels the old incarnation.
-A host should detect `handshake_required`, create a fresh nonce and explicitly
-restart the desired case. Save/load continuation is not implicitly resumed.
+Host reconnect uses a fresh nonce and cancels the old incarnation through a
+synchronized command. `on_load` does not independently change session state,
+because it also runs on joining clients. The launcher currently starts fresh
+scenarios; arbitrary saved-session resumption remains a separate lifecycle test.
+
+Bulk-file publication uses `helpers.write_file` with `for_player=0`: only the
+authoritative server writes it. `pending`/`transfer` is published after the write.
+The path is fixed, not supplied by a solver; clients neither read it nor make
+local planning decisions. The existing result commit remains authoritative.
 
 GUI commands in the marked test save:
 

@@ -23,6 +23,7 @@ import time
 import uuid
 
 from rcon import Rcon, RconError
+from bulk_file import read_work
 from solve import reject_constant, reject_pairs
 from solver import solve, validate_result
 
@@ -151,6 +152,19 @@ def download(client: Rcon, token: str, timeout: float = 90) -> dict:
     return work
 
 
+def receive_work(client: Rcon, token: str, status: dict, artifact_root: Path,
+                 transport: str, timeout: float = 90) -> tuple[dict, dict]:
+    if transport == "file":
+        return read_work(artifact_root / "write-data/script-output", status.get("transfer"), token, client.session_id)
+    if transport != "rcon":
+        raise RconError("unsupported snapshot transport")
+    started = time.perf_counter()
+    work = download(client, token, timeout)
+    return work, {"transport": "rcon", "bytes": status["bytes"],
+                  "bulk_rcon_commands": (status["bytes"] + CHUNK_BYTES - 1) // CHUNK_BYTES,
+                  "read_decode_verify_ms": (time.perf_counter() - started) * 1000}
+
+
 def upload(client: Rcon, token: str, result: dict, timeout: float = 90) -> dict:
     data = json_text(result).encode("utf-8")
     if len(data) > MAX_TRANSFER:
@@ -196,20 +210,36 @@ def wait_terminal(client: Rcon, process: subprocess.Popen, token: str, timeout: 
     raise RconError("native movement did not reach a terminal state before watchdog")
 
 
-def evaluate(client: Rcon, process: subprocess.Popen, artifact_root: Path, timeout: float) -> dict:
+def evaluate(client: Rcon, process: subprocess.Popen, artifact_root: Path, timeout: float,
+             transport: str = "file", compare_transports: bool = False) -> dict:
     tests = []
     def expect(name: str, passed: bool, detail: object):
         tests.append({"name": name, "passed": bool(passed), "detail": detail})
+    request_started = time.perf_counter()
     checked(client.service("begin", fixture_id="open-diagonal"))
-    token, _ = wait_work(client, process, timeout)
-    work = download(client, token, timeout)
+    token, status = wait_work(client, process, timeout)
+    capture_ready_ms = (time.perf_counter() - request_started) * 1000
+    work, transfer = receive_work(client, token, status, artifact_root, transport, timeout)
+    comparison = None
+    if compare_transports:
+        other_work, comparison = receive_work(client, token, status, artifact_root, "rcon", timeout)
+        expect("bulk-transports-preserve-identical-problem", work == other_work,
+               {"selected": transfer, "comparison": comparison})
+    if transport == "file":
+        expect("bulk-file-avoids-per-chunk-rcon", transfer["bulk_rcon_commands"] == 0
+               and transfer["bytes"] == status["bytes"], transfer)
     started = time.perf_counter()
     result = solve(work["snapshot"], work["query"])
     solve_ms = (time.perf_counter() - started) * 1000
+    validation_started = time.perf_counter()
     validate_result(work["snapshot"], work["query"], result)
+    result_validation_ms = (time.perf_counter() - validation_started) * 1000
     (artifact_root / "live-work.json").write_text(json.dumps(work, indent=2), encoding="utf-8")
     (artifact_root / "live-result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+    admission_started = time.perf_counter()
     admitted = upload(client, token, result, timeout)
+    admission_ms = (time.perf_counter() - admission_started) * 1000
+    command_to_admission_ms = (time.perf_counter() - request_started) * 1000
     expect("external-result-admitted", result_admitted(admitted), admitted)
     if result_admitted(admitted):
         duplicate = client.service("commit", request_token=token)
@@ -223,8 +253,8 @@ def evaluate(client: Rcon, process: subprocess.Popen, artifact_root: Path, timeo
                and (terminal.get("terminal") or {}).get("execution_arrival_tolerance") == work["query"]["execution"]["arrival_tolerance"]
                and (terminal.get("terminal") or {}).get("arrival_error", float("inf")) <= work["query"]["execution"]["arrival_tolerance"], terminal)
     checked(client.service("begin", fixture_id="open-diagonal"))
-    cancelled_token, _ = wait_work(client, process, timeout)
-    old_work = download(client, cancelled_token, timeout)
+    cancelled_token, old_status = wait_work(client, process, timeout)
+    old_work, _ = receive_work(client, cancelled_token, old_status, artifact_root, transport, timeout)
     old_result = solve(old_work["snapshot"], old_work["query"])
     cancel = client.service("cancel", request_token=cancelled_token)
     expect("cancel-request", cancel.get("ok") is True and cancel.get("status") == "cancelled"
@@ -235,8 +265,8 @@ def evaluate(client: Rcon, process: subprocess.Popen, artifact_root: Path, timeo
            and after_cancel.get("admission_count") == 0,
            {"late": late, "after_cancel": after_cancel})
     checked(client.service("begin", fixture_id="open-diagonal"))
-    stale_token, _ = wait_work(client, process, timeout)
-    stale_work = download(client, stale_token, timeout)
+    stale_token, stale_status = wait_work(client, process, timeout)
+    stale_work, _ = receive_work(client, stale_token, stale_status, artifact_root, transport, timeout)
     stale_result = solve(stale_work["snapshot"], stale_work["query"])
     checked(client.service("capabilities", nonce="test-reconnect-" + uuid.uuid4().hex))
     stale = upload(client, stale_token, stale_result)
@@ -244,21 +274,27 @@ def evaluate(client: Rcon, process: subprocess.Popen, artifact_root: Path, timeo
     return {"schema_version": 1, "suite": "live-navigation", "passed": sum(test["passed"] for test in tests),
             "failed": sum(not test["passed"] for test in tests), "tests": tests,
             "snapshot_id": work["snapshot"]["snapshot_id"], "query_hash": work["query"]["query_hash"],
-            "solver_ms": solve_ms, "result_outcome": result["outcome"]}
+            "solver_ms": solve_ms, "result_outcome": result["outcome"],
+            "capture_ready_ms": capture_ready_ms, "transfer": transfer,
+            "transport_comparison": comparison, "upload_admission_ms": admission_ms,
+            "result_validation_ms": result_validation_ms,
+            "command_to_admission_ms": command_to_admission_ms,
+            "command_timing_includes_comparison": compare_transports}
 
 
-def run_worker(client: Rcon, process: subprocess.Popen, artifact_root: Path) -> None:
+def run_worker(client: Rcon, process: subprocess.Popen, artifact_root: Path, transport: str = "file") -> None:
     handled = set()
     while process.poll() is None:
         answer = checked(client.service("poll"))
         token = work_token(answer)
         if token and token not in handled and answer.get("status") == "pending":
-            work = download(client, token)
+            work, transfer = receive_work(client, token, answer, artifact_root, transport)
             result = solve(work["snapshot"], work["query"])
             answer = upload(client, token, result)
             handled.add(token)
             (artifact_root / "latest-work.json").write_text(json.dumps(work, indent=2), encoding="utf-8")
             (artifact_root / "latest-result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+            (artifact_root / "latest-transfer.json").write_text(json.dumps(transfer, indent=2), encoding="utf-8")
             print("SCV_LIVE_SOLVED " + json_text({"token": token, "outcome": result["outcome"],
                                                   "admitted": result_admitted(answer), "game_status": answer.get("status"),
                                                   "reason": answer.get("reason")}), flush=True)
@@ -273,9 +309,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=float, default=90)
     parser.add_argument("--artifact-root", type=Path)
     parser.add_argument("--scenario", default="scv-control-testkit/navigation-live")
+    parser.add_argument("--snapshot-transport", choices=("file", "rcon"), default="file")
+    parser.add_argument("--compare-transports", action="store_true", help="With --test, compare the same snapshot against legacy RCON chunks")
     args = parser.parse_args(argv)
     if args.timeout <= 0 or args.port < 0 or args.port > 65535:
         parser.error("invalid timeout/port")
+    if args.compare_transports and (not args.test or args.snapshot_transport != "file"):
+        parser.error("--compare-transports requires --test and --snapshot-transport file")
     root = Path(__file__).resolve().parents[2]
     artifact_root = args.artifact_root.resolve() if args.artifact_root else Path(tempfile.mkdtemp(prefix="factorio-scv-live-"))
     artifact_root.mkdir(parents=True, exist_ok=True)
@@ -335,21 +375,23 @@ def main(argv: list[str] | None = None) -> int:
                 with (artifact_root / "rpc-trace.jsonl").open("a", encoding="utf-8") as trace:
                     trace.write(json_text(record) + "\n")
             client.trace = record_rpc
-            capabilities = checked(client.service("capabilities", nonce="host-" + uuid.uuid4().hex))
+            capabilities = checked(client.service("capabilities", nonce="host-" + uuid.uuid4().hex,
+                                                  snapshot_transport=args.snapshot_transport))
             gui_profile = client_profile(artifact_root, binary, mods, f"127.0.0.1:{game_port}")
             metadata = {"version": version.splitlines()[0], "pid": process.pid, "join_address": f"127.0.0.1:{game_port}",
                         "rcon_address": f"127.0.0.1:{rcon_port}", "scenario": args.scenario,
-                        "capabilities": capabilities, "artifact_root": str(artifact_root), "gui_client": gui_profile}
+                        "capabilities": capabilities, "artifact_root": str(artifact_root), "gui_client": gui_profile,
+                        "snapshot_transport": args.snapshot_transport}
             (artifact_root / "live-session.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
             print("SCV_LIVE_READY " + json_text(metadata), flush=True)
             if args.test:
-                report = evaluate(client, process, artifact_root, args.timeout)
+                report = evaluate(client, process, artifact_root, args.timeout, args.snapshot_transport, args.compare_transports)
                 report["factorio"] = version.splitlines()[0]
                 (artifact_root / "live-report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
                 print(f"SCV_LIVE_COMPLETE passed={report['passed']} failed={report['failed']}", flush=True)
                 return 0 if report["failed"] == 0 else 1
             print("Manual GUI profile: " + gui_profile["instructions"] + ". Stop this host with Ctrl+C.", flush=True)
-            run_worker(client, process, artifact_root)
+            run_worker(client, process, artifact_root, args.snapshot_transport)
         return 0
     except KeyboardInterrupt:
         print("SCV_LIVE_STOPPED", flush=True)

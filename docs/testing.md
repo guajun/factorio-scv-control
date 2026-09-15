@@ -68,6 +68,10 @@ Interchange writes `script-output/scv-control/navigation/interchange-results.jso
 waits for native arrival, duplicate rejection, cancellation and session replacement.
 It is also part of `-Suite all`. Its independent retained artifact root contains
 `live-report.json`, exact work/result values and `rpc-trace.jsonl`. The default
+uses server-only bulk-file snapshot transfer; RCON carries control/result data.
+Run `python tools/navigation/live.py --test --compare-transports` separately for
+an identical-input comparison with the slow legacy chunked download. It is not
+part of default testing. The default
 suite never launches the generated manual GUI client script. See the
 [live host guide](../tools/navigation/LIVE.md) for connecting a client with matching
 mod copies. A manual two-peer connection/desync test is not implied by a passing

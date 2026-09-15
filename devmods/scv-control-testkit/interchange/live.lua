@@ -7,6 +7,7 @@ local WireJson = require("__factorio-scv-control__/scripts/navigation/wire_json"
 
 local Live = {PROTOCOL = "scv-navigation/1", CHUNK_BYTES = 3000}
 local MAX_UPLOAD = 1024 * 1024
+local WORK_FILE = "scv-control/navigation/live-work.json"
 local WAIT_TICKS = 36000 -- transport failure guard; host uses a separate wall clock watchdog
 
 local function enabled()
@@ -33,6 +34,12 @@ local function summary(state)
     result.chunks = request.work and math.ceil(#request.work / Live.CHUNK_BYTES) or 0
     result.query_id = request.session and request.session.query.query_id
     result.query_hash = request.session and request.session.query.query_hash
+    if request.status == "pending" and request.work_file then
+      result.transfer = {kind = "script-output-file-v1", path = request.work_file,
+        bytes = #request.work, request_token = request.token, session_id = state.session_id,
+        query_id = result.query_id, query_hash = result.query_hash,
+        snapshot_hash = request.session.query.data_ref.snapshot_hash}
+    end
     result.reason = request.reason
     result.committed = request.committed == true
     result.admission_count = request.admission_count or 0
@@ -138,6 +145,14 @@ local function prepare(state, request)
     request_token = request.token, id = request.fixture_id, snapshot = snapshot, query = query})
   if not work then request.status, request.reason = "failed", work_error.code; return end
   if not ascii_json_bytes(work) then request.status, request.reason = "failed", "non-ascii-fixture-transport"; return end
+  -- Bulk data never traverses the synchronized command stream in file mode.
+  -- Publish the descriptor only after writing completes, and only write on the
+  -- authoritative server. The single-slot file is correlated by the full token
+  -- and hashes, so an old reader cannot accept a newer request's contents.
+  if state.snapshot_transport == "file" then
+    helpers.write_file(WORK_FILE, work, false, 0)
+    request.work_file = WORK_FILE
+  end
   request.work, request.status, request.pending_tick = work, "pending", game.tick
   watch_request(request)
 end
@@ -149,18 +164,25 @@ function Live.dispatch(message)
   if operation == "capabilities" then
     local state = storage.scv_navigation_live
     if message.nonce then
+      local transport = message.snapshot_transport or (state and state.snapshot_transport) or "file"
+      if transport ~= "file" and transport ~= "rcon" then return error_reply("unsupported-snapshot-transport") end
       if type(message.nonce) ~= "string" or #message.nonce < 8 or #message.nonce > 128
           or not message.nonce:match("^[%w_-]+$") then return error_reply("invalid-session-nonce") end
       if not state or state.nonce ~= message.nonce then
         if state then stop_request(state.request, "session-replaced") end
         restore_player()
-        state = {nonce = message.nonce, session_id = "live:" .. message.nonce, sequence = 0}
+        state = {nonce = message.nonce, session_id = "live:" .. message.nonce, sequence = 0,
+          snapshot_transport = transport}
         storage.scv_navigation_live = state
+      elseif state.snapshot_transport ~= transport then
+        return error_reply("transport-change-requires-fresh-session")
       end
     end
     local result = state and summary(state) or {ok = true, protocol = Live.PROTOCOL, status = "disconnected"}
     result.handshake_required, result.chunk_bytes, result.max_upload_bytes = not state, Live.CHUNK_BYTES, MAX_UPLOAD
     result.capabilities = {"bounded-static-fixtures", "distance", "external-provider", "native-follower", "gui-spectator"}
+    result.snapshot_transports = {"file", "rcon"}
+    result.snapshot_transport = state and state.snapshot_transport
     return result
   end
   local state = storage.scv_navigation_live

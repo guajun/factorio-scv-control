@@ -4,6 +4,30 @@ New entries go at the top. Keep failed hypotheses and operational mistakes: the 
 
 Each entry should state the question, exact fixture/version, measured result, falsified assumption, and decision. Generated JSON remains the source of exact per-path data; this document records why the result changed the design.
 
+## 2026-09-15 - Move bulk snapshots out of the synchronized command channel
+
+**Question:** Is the 18-second local snapshot transfer inherent to external solving, and can a supported transport replace the serial RCON downloads?
+
+**Available interfaces:** Installed Factorio 2.0.77 documentation confirms sandboxed Lua removes `io`, `os`, `loadfile` and arbitrary external module loading; there is no supported mod shared-memory mapping API. `helpers.write_file` writes to the controlled script-output directory and supports server-only output. Localhost `send_udp`/`recv_udp` also exist with `--enable-lua-udp`, but receive documentation specifies a 256 KiB buffer, possible loss while paused/saving, and multiplayer input-action distribution. Sources: [libraries](https://lua-api.factorio.com/latest/auxiliary/libraries.html), [LuaHelpers](https://lua-api.factorio.com/latest/classes/LuaHelpers.html), cross-checked against the installed `doc-html` at 2.0.77. UDP was reviewed, not runtime-benchmarked in this experiment.
+
+**Change:** Default to a server-only, single-slot bulk file for the exact snapshot/query bytes. Publish the bounded file descriptor after `write_file` completes; the host checks the fixed confined path, exact byte count, session/request, query hash and snapshot content hash. RCON carries small control/result messages and retains the authoritative shared PlanningRun commit. No native injection, external Lua file reading, dropped metadata, grid coarsening or relaxed collision check was introduced. Legacy RCON snapshot download is an explicit comparison mode, not the default.
+
+**Same-input measurement:** `python tools/navigation/live.py --test --compare-transports`, Factorio 2.0.77, fixture-v4 `open-diagonal`, **3,382,790 identical bytes**:
+
+| Channel/stage | Measured wall time | Bulk RCON commands |
+| --- | ---: | ---: |
+| Legacy chunked download + JSON decode | 18,845 ms | 1,128 |
+| Bulk file read only | 2.107 ms | 0 |
+| Bulk file read + JSON decode + query/source identity checks | 359.321 ms | 0 |
+
+Both channels produce exactly equal problem values and native movement still arrives in 133 movement ticks with the same 0.311326-tile error. All eight A/B/live assertions passed, including ordinary lifecycle checks. Artifact: local temp `factorio-scv-live-s5pbrpww`.
+
+**Do not hide remaining latency:** Game-side capture/build/encoding/publication took 4,590.881 ms; solver call including input validation/setup took 1,450.133 ms; result upload plus Lua admission took 1,461.038 ms. Game-side file-write time belongs to capture-to-ready, not the 2.107 ms host read. The final default-mode probe measured **9,974.417 ms from begin to admission**, with no A/B delay: capture-to-ready 4,671.666 ms, read/decode/identity 365.652 ms, solver including input validation/setup 1,455.317 ms, separate host result validation 725.654 ms, upload/admission 1,523.096 ms. The remaining approximately 1,233 ms includes diagnostic artifact serialization/writing and harness work; this probe is not a warmed GUI latency measurement. The report flags whether the deliberately slow A/B comparison is included. A fast bulk transfer does not make this cold-per-command prototype low-latency.
+
+**Regression coverage:** Missing/truncated/oversized files, unexpected paths, changed query/geometry, stale session/request, malformed/duplicate-key/nonfinite JSON all reject. A host test forbids any RCON data call in file mode. Engine conformance checks default transport selection and requires a new synchronized session to change transports. Final `pwsh -NoProfile -File .\tools\test.ps1 -Suite all -KeepArtifacts` passed: smoke, 107 integration assertions, the unchanged static benchmark and three episode baselines, 11 interchange assertions, 36 Python tests, and seven default-file live assertions. Explicit legacy `--snapshot-transport rcon` also passed all six lifecycle assertions. Everything ran headless; slow A/B is opt-in. Final artifacts: local temp `factorio-scv-agent-test-a6b5df8ae9e74a108f27e24473a9d67f` and `factorio-scv-live-rhl7bp5i`; legacy probe `factorio-scv-live-5we_qkgz`.
+
+**Decision:** Separate control traffic from bulk data now. Continue #16 with committed world reuse, incremental changes and staged capture; those address the remaining seconds of capture/admission. Do not treat compression, shared-memory terminology, or a transport swap as a substitute for that cache lifecycle. Leave a reliable explicit baseline for measuring each subsequent change.
+
 ## 2026-09-15 - External solver boundary reaches native execution; transport remains expensive
 
 **Question:** Can an external solver consume the same exact captured problem, return through production validation, and finish real character movement without launching a GUI?
