@@ -4,6 +4,7 @@ local Fixtures = require("pathfinding.fixtures")
 local PlanningRun = require("__factorio-scv-control__/scripts/navigation/planning_run")
 local Follower = require("__factorio-scv-control__/scripts/follower")
 local WireJson = require("__factorio-scv-control__/scripts/navigation/wire_json")
+local Clock = require("debug.clock")
 
 local Live = {PROTOCOL = "scv-navigation/1", CHUNK_BYTES = 3000}
 local MAX_UPLOAD = 1024 * 1024
@@ -28,6 +29,7 @@ end
 local function summary(state)
   local request = state.request
   local result = {ok = true, protocol = Live.PROTOCOL, session_id = state.session_id}
+  result.clock = Clock.status(request and request.session and request.session.actor)
   if request then
     result.request_token, result.status, result.fixture_id = request.token, request.status, request.fixture_id
     result.bytes = request.work and #request.work or 0
@@ -41,6 +43,7 @@ local function summary(state)
         snapshot_hash = request.session.query.data_ref.snapshot_hash}
     end
     result.reason = request.reason
+    result.world_source = request.world_source
     result.committed = request.committed == true
     result.admission_count = request.admission_count or 0
     if request.status == "arrived" or request.status == "rejected" or request.status == "failed"
@@ -98,15 +101,34 @@ local function watch_request(request)
   player.print("External solver pending. /scv-nav-live return restores your character.")
 end
 
-local function begin(state, fixture_id, player_index)
+local function begin(state, fixture_id, player_index, source)
   if not Fixtures.get(fixture_id) then return error_reply("unknown-fixture") end
   if state.request and not summary(state).terminal then return error_reply("request-active") end
   restore_player()
   state.sequence = state.sequence + 1
   state.request = {fixture_id = fixture_id, token = state.session_id .. ":request:" .. state.sequence,
     status = "queued", queued_tick = game.tick, upload = {}, upload_bytes = 0,
-    upload_next_index = 1, player_index = player_index}
+    upload_next_index = 1, player_index = player_index, source = source}
   return summary(state)
+end
+
+local function prepare_save(state, message)
+  local fixture = Fixtures.get(message.fixture_id)
+  if not fixture then return error_reply("unknown-fixture") end
+  if state.request and not summary(state).terminal then return error_reply("request-active") end
+  if type(message.name) ~= "string" or not message.name:match("^scv%-nav%-[%w_-]+$") or #message.name > 80 then
+    return error_reply("invalid-debug-save-name")
+  end
+  if storage.scv_navigation_saved_fixture then return error_reply("source-map-already-built") end
+  local surface = Capture.ensure_surface("scv-navigation-saved-source")
+  Fixtures.build(surface, fixture)
+  local actor = assert(surface.create_entity({name = "character", position = fixture.start, force = "player"}))
+  storage.scv_navigation_saved_fixture = {fixture_id = fixture.id, surface = surface, actor = actor,
+    goal = fixture.goal, bounds = fixture.bounds, built_tick = game.tick, build_count = 1}
+  Clock.dispatch({action = "pause"}, actor)
+  game.server_save(message.name)
+  return {ok = true, clock = Clock.status(actor), source = {fixture_id = fixture.id,
+    surface_index = surface.index, actor_unit_number = actor.unit_number, built_tick = game.tick, build_count = 1}}
 end
 
 local function runtime(request)
@@ -117,12 +139,28 @@ local function runtime(request)
 end
 
 local function prepare(state, request)
-  local snapshot, query, actor = Capture.fixture(request.fixture_id, {
+  local options = {
     session_id = state.session_id, query_id = request.token .. ":query",
     command_id = tostring(state.sequence), attempt_id = "1",
     snapshot_id = request.token .. ":snapshot", backend_session_id = request.token,
     surface_name = "scv-navigation-live", keep_actor = true
-  })
+  }
+  local snapshot, query, actor
+  if request.source == "stored-map" then
+    local source = storage.scv_navigation_saved_fixture
+    if not source or source.fixture_id ~= request.fixture_id or not source.actor.valid or not source.surface.valid then
+      request.status, request.reason = "failed", "stored-map-missing"; return
+    end
+    actor = source.actor
+    -- Read the exact stored map and actor: no fixture builder/replay reconstruction.
+    snapshot, query = Capture.live(source.surface, actor, point(actor.position), source.goal, source.bounds, options)
+    request.world_source = {kind = "stored-map", fixture_id = source.fixture_id,
+      actor_unit_number = actor.unit_number, surface_index = source.surface.index,
+      built_tick = source.built_tick, build_count = source.build_count}
+  else
+    snapshot, query, actor = Capture.fixture(request.fixture_id, options)
+    request.world_source = {kind = "fresh-fixture"}
+  end
   if not snapshot then request.status, request.reason = "failed", query.code; return end
   -- Capture and execution share this exact actor/surface incarnation. Only the
   -- accepted-route/follower adapter is reused from offline replay.
@@ -154,6 +192,7 @@ local function prepare(state, request)
     request.work_file = WORK_FILE
   end
   request.work, request.status, request.pending_tick = work, "pending", game.tick
+  if state.solver_clock == "stepped" then Clock.dispatch({action = "pause"}, actor) end
   watch_request(request)
 end
 
@@ -165,6 +204,8 @@ function Live.dispatch(message)
     local state = storage.scv_navigation_live
     if message.nonce then
       local transport = message.snapshot_transport or (state and state.snapshot_transport) or "file"
+      local solver_clock = message.solver_clock or (state and state.solver_clock) or "realtime"
+      if solver_clock ~= "realtime" and solver_clock ~= "stepped" then return error_reply("unsupported-solver-clock") end
       if transport ~= "file" and transport ~= "rcon" then return error_reply("unsupported-snapshot-transport") end
       if type(message.nonce) ~= "string" or #message.nonce < 8 or #message.nonce > 128
           or not message.nonce:match("^[%w_-]+$") then return error_reply("invalid-session-nonce") end
@@ -172,23 +213,41 @@ function Live.dispatch(message)
         if state then stop_request(state.request, "session-replaced") end
         restore_player()
         state = {nonce = message.nonce, session_id = "live:" .. message.nonce, sequence = 0,
-          snapshot_transport = transport}
+          snapshot_transport = transport, solver_clock = solver_clock}
         storage.scv_navigation_live = state
       elseif state.snapshot_transport ~= transport then
         return error_reply("transport-change-requires-fresh-session")
+      elseif state.solver_clock ~= solver_clock then
+        return error_reply("clock-change-requires-fresh-session")
       end
     end
     local result = state and summary(state) or {ok = true, protocol = Live.PROTOCOL, status = "disconnected"}
     result.handshake_required, result.chunk_bytes, result.max_upload_bytes = not state, Live.CHUNK_BYTES, MAX_UPLOAD
-    result.capabilities = {"bounded-static-fixtures", "distance", "external-provider", "native-follower", "gui-spectator"}
+    result.capabilities = {"bounded-static-fixtures", "distance", "external-provider", "native-follower", "gui-spectator",
+      "native-debug-clock", "stored-map-capture"}
     result.snapshot_transports = {"file", "rcon"}
     result.snapshot_transport = state and state.snapshot_transport
+    result.solver_clock = state and state.solver_clock
     return result
   end
   local state = storage.scv_navigation_live
   if not state then return error_reply("session-handshake-required") end
   if message.session_id ~= state.session_id then return error_reply("stale-session") end
-  if operation == "begin" then return begin(state, message.fixture_id) end
+  if operation == "clock" then
+    return Clock.dispatch(message, state.request and state.request.session and state.request.session.actor
+      or storage.scv_navigation_saved_fixture and storage.scv_navigation_saved_fixture.actor)
+  end
+  if operation == "prepare-save" then return prepare_save(state, message) end
+  if operation == "begin" then
+    if message.source ~= nil and message.source ~= "stored-map" then return error_reply("unknown-map-source") end
+    local result = begin(state, message.fixture_id, nil, message.source)
+    if result.ok and state.solver_clock == "stepped" and game.tick_paused then
+      -- Capture/admission can run synchronously while entity updates are frozen.
+      prepare(state, state.request)
+      return summary(state)
+    end
+    return result
+  end
   if operation == "poll" then
     if message.request_token and (not state.request or message.request_token ~= state.request.token) then return error_reply("stale-request") end
     return summary(state)
@@ -251,6 +310,12 @@ end
 
 function Live.add_commands()
   if not enabled() then return end
+  commands.add_command("scv-nav-clock", "Debug test-map clock: status | pause | resume | step N (1..3600)", function(command)
+    local action, count = (command.parameter or "status"):match("^(%S+)%s*(%S*)$")
+    local result = Clock.dispatch({action = action, ticks = tonumber(count)})
+    local encoded = assert(WireJson.encode(result))
+    if command.player_index then game.get_player(command.player_index).print(encoded) else rcon.print(encoded) end
+  end)
   commands.add_command("scv-nav-agent", "Bounded JSON RPC for a local external solver on the TestKit map.", function(command)
     if command.player_index then game.get_player(command.player_index).print("Use /scv-nav-live for GUI tests."); return end
     local payload = command.parameter or ""
@@ -285,7 +350,16 @@ end
 -- The authoritative host rotates the nonce through a synchronized command on
 -- reconnect; no peer invents a session transition merely because it loaded.
 
-Live.events = {[defines.events.on_tick] = function(event)
+Live.events = {[defines.events.on_player_created] = function(event)
+  if not enabled() then return end
+  local source = storage.scv_navigation_saved_fixture
+  if source and source.actor and source.actor.valid then
+    local player = game.get_player(event.player_index)
+    player.set_controller({type = defines.controllers.spectator})
+    player.teleport(source.actor.position, source.surface)
+    player.print("Saved navigation source map. /scv-nav-clock resume advances the world; /scv-nav-clock step N advances exactly N ticks.")
+  end
+end, [defines.events.on_tick] = function(event)
   if not enabled() then return end
   local state = storage.scv_navigation_live
   local request = state and state.request

@@ -9,8 +9,9 @@ contains the external framework;
 [PR #19](https://github.com/guajun/factorio-scv-control/pull/19) contains native
 calibration and source-polygon replay, stacked on #18's branch. The new
 execution wave is [PR #20](https://github.com/guajun/factorio-scv-control/pull/20)
-on `codex/domain-execution-wave`, following #19. All three PRs remain unmerged
-as of this checkpoint; review the foundation first.
+on `codex/domain-execution-wave`, following #19. The saved-map follow-up is on
+`codex/save-backed-testbench`, based on execution commit `0f07a87`. The preceding
+three PRs remain unmerged as of this checkpoint; review the foundation first.
 
 ## Delivery state
 
@@ -22,9 +23,11 @@ as of this checkpoint; review the foundation first.
 | External interchange | PR #18: exact snapshot/query/result identity, reference Dijkstra/A*, native replay and live headless loop; all validated on its branch. | PR #18 is not merged. Static distance-only domain; not a general live-world solver. |
 | Local transport | Default bulk file plus short RCON messages. Same-input receive/decode/check is about 0.36 s versus 18.85 s legacy chunks. | Diagnostic cold begin-to-admission remains about 10 s. Cache/incremental updates and GUI lifecycle stay in #16. |
 | Real gates | Six calibration cases, then ten action/follower cases: safe normal/fast opening, close-start waiting, eligibility rejection and changing preconditions. | Current static validator still rejects an opened gate. Shared semantic admission, gate-versus-detour cost and production profile integration remain in #9; broader force/circuit calibration remains in #8. |
-| Belts | 56 native calibration cases; measured discrete velocity hull, directed cost prototype and 30 native controller arrivals plus three model cases. Express crossing drift 5.0625 → 0.2461 tiles, time 142 → 70 ticks. | Uniform unobstructed fields only. No time-aware route search, swept-wall validation, field boundaries, equipment, dynamic controller refresh or stationary holding; #2/#10 stay open. |
+| Belts | 56 native calibration cases; measured discrete velocity hull, directed cost prototype and 30 native controller arrivals plus four model cases. Saved replay binds its goal/width independently of current defaults. Express crossing drift 5.0625 → 0.2461 tiles, time 142 → 70 ticks. | Uniform unobstructed fields only. No time-aware route search, swept-wall validation, field boundaries, equipment, dynamic controller refresh or stationary holding; #2/#10 stay open. |
 | Topology quality | #17 first source-polygon backend: all 11 cases retained, ten complete routes pass native replay; tight distance 23.2191 → 20.0661 versus captured grid. | Only static wall/tile geometry. Update/memory/larger-domain and live/GUI integration remain; no default promotion. |
 | Dynamic movement | New shared PlanningRun/Follower wrapper stops on-route construction in its event and requests replan one tick later; native off-route/behind/removal/forward-belt controls and pure policy cases. Historical failure stays as a control. | Test adapter only. Motion/transient notifications lack a control/avoidance consumer; production event coverage, external committed generations and aggregate frame-time budgets remain in #11. |
+| Native source maps | 45 directly openable gate/dynamic/belt saves, source ZIP/facts/mod hashes, fresh-process replay with zero geometry builders; each case records actual native outcomes and script-hook timing. | Current corpus covers this domain execution wave. Derived grids/state tables still need their own equivalence tests; larger factory performance remains unproven. |
+| External debug clock | Saved long-wall map, real capture/solver/admission while frozen, native exact stepping to arrival; 16 checks plus retained seven-check realtime loop. | Stepping proves correctness, not realtime speed. Cold capture and solver remain expensive. |
 
 GitHub milestone `SC2-like navigation foundation` currently has four closed
 and eight open issues, including tracking #3. Closed: #4, #5, #6, #7. Open:
@@ -33,8 +36,15 @@ one-third complete: foundational work and feature work have different sizes.
 
 ## Current wave and ownership
 
-The execution branches start from calibration/topology commit `765dad0`, not
-the older dirty user checkout. No ordinary save or GUI mod junction is changed.
+The current saved-map branch starts from execution commit `0f07a87`, not the
+older dirty user checkout. Native source maps are retained outside the checkout
+at `F:\factorio-scv-testbench\corpora`. No ordinary save or GUI mod junction is
+changed. Three parallel lanes own source-map runtime, observed-facts contracts,
+and native solver stepping; the integration owner owns the host runner, common
+validation and final evidence. The [saved-map guide](save-backed-testbench.md)
+documents opening maps and replaying the same corpus with a different checkout.
+
+The preceding execution wave used these bounded ownership lanes:
 
 | Lane | Branch / ownership | Bounded delivery |
 | --- | --- | --- |
@@ -54,7 +64,49 @@ spells out representation, planning, execution and the combined-domain test.
 #16 can optimize warm-query latency independently. No GitHub Actions or automatic
 GUI launch is introduced; GUI preview/join capability remains explicit/manual.
 
-## Execution wave validation
+## Saved-map follow-up validation
+
+The final `pwsh -NoProfile -File .\tools\test.ps1 -Suite all -KeepArtifacts`
+passes after the saved-evidence and variable-save-shard fixes. Factorio 2.0.77
+runs the original smoke, 109 integration assertions, 11 x 10 static benchmark,
+three historical episodes, repeated 6 gate / 56 belt calibrations, 11 interchange
+assertions and seven realtime live checks. The repeated execution matrix is now
+62 cases / 356 assertions per repetition: gates 10/72, dynamic 18/89 and belts
+34/195. Seventy host tests pass, including source identity and publication
+regressions.
+
+All 45 unchanged source ZIPs then pass fresh-process replay, with actual loaded
+facts, zero geometry-builder calls and one current derived-state compile. Their
+denominator is 38 arrivals, three eligibility rejections and four precondition
+invalidations. The separate saved long-wall external run passes 16 stepped
+checks and arrives in 124 native travel ticks. Capture takes 3,143.2 ms, solver
+1,084.4 ms and total frozen wall time 6,392.9 ms, with zero game ticks during
+that wait. This is correctness evidence, explicitly not realtime qualification.
+
+Real-map performance remains a failing promotion gate: the five dynamic cases
+all exceed the 16.667 ms single-hook reference budget. Final maxima are
+140.0633 ms (inserted wall), 31.1198 ms (off-route), 45.2569 ms (behind),
+166.8624 ms (removed-wall detour), and 39.7833 ms (forward belt edit).
+Their movement-hook p95 is 0.0607–0.1428 ms. These measurements identify expensive
+synchronous planning callbacks on loaded maps; they are not full-engine CPU
+profiles or factory-scale benchmarks. Functional suite success does not erase
+this performance failure.
+
+Authoritative maps: `F:\factorio-scv-testbench\corpora\v1-20260915-174358-8e2cde`.
+The local `F:\factorio-scv-testbench\README.md` gives manual open commands.
+Final retained artifacts under local temp:
+
+- `factorio-scv-agent-test-b889d6ddae3f4483947267c6946fb1bc`: main suite.
+- `scv-calibration-8xsyjogi`: original repeated physical calibration.
+- `scv-calibration-79d5oooq`: repeated execution and stale-evidence regressions.
+- `scv-savebench-79riqaks/savebench-results.json`: all 45 correlated source replays and performance.
+- `factorio-scv-live-7a6np3j2`: ordinary realtime loop.
+- `factorio-scv-live-9w056y05`: stepped loop, actual source ZIP and exact copied mods.
+
+No graphical Factorio client was launched. Save publication and stale-evidence
+failures are preserved in the newest [experiment entry](pathfinding-experiments.md).
+
+## Prior execution wave validation
 
 The integrated `pwsh -NoProfile -File .\tools\test.ps1 -Suite all -KeepArtifacts`
 passes on Factorio 2.0.77. It includes smoke, 109 engine integration assertions,

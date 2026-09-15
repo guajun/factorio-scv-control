@@ -5,11 +5,28 @@ local Controller = require("__factorio-scv-control__/scripts/navigation/motion/u
 local Follower = require("__factorio-scv-control__/scripts/follower")
 local Trajectory = require("__factorio-scv-control__/scripts/trajectory")
 local PathMath = require("__factorio-scv-control__/scripts/path_math")
+local Command = require("calibration.belt_controller.command")
 local Probe = {}
 local SURFACE = "scv-belt-controller"
 local function copy(p) return PathMath.copy_position(p) end
 local function expect(probe, name, passed, details)
   probe.assertions[#probe.assertions + 1] = {name = name, passed = passed == true, details = details}
+end
+
+function Probe.arm(source, tick, saved_command)
+  local fixture, actor, surface = source.fixture, source.actor, source.surface
+  local spec = ModelTests.spec(fixture.belt, fixture.belt_direction)
+  spec.running_speed = actor.character_running_speed
+  local field = assert(Motion.field(spec))
+  return {surface = surface, actor = actor, fixture = fixture, field = field, saved_command = saved_command,
+    started_tick = tick, samples = 0, timeline = {}, assertions = {},
+    metrics = {mode = fixture.mode, relationship = fixture.relationship, pair = fixture.pair,
+      belt = fixture.belt, belt_direction = fixture.belt_direction, command_direction = fixture.direction,
+      actual_belt_count = surface.count_entities_filtered({name = fixture.belt, area = {{-12, -12}, {12, 12}}}),
+      actor_profile = spec.actor_profile, model_id = field.id, calibration_id = field.calibration_id, model_spec = spec,
+      corridor_half_width = saved_command and saved_command.corridor_half_width or Fixtures.corridor_half_width,
+      actual_distance = 0, max_cross_track_error = 0, direction_switches = 0, max_velocity_model_error = 0,
+      native_execution = true, production_profile_modified = false}}
 end
 
 function Probe.start(fixture)
@@ -25,24 +42,12 @@ function Probe.start(fixture)
     surface.set_tiles(tiles, true, false, false, false)
   end
   for _, entity in pairs(surface.find_entities({{-20, -20}, {20, 20}})) do entity.destroy() end
-  local count = 0
   for x = -12, 11 do for y = -12, 11 do
     assert(surface.create_entity({name = fixture.belt, position = {x + 0.5, y + 0.5},
       direction = fixture.belt_direction, force = "player"}))
-    count = count + 1
   end end
   local actor = assert(surface.create_entity({name = "character", position = {0.5, 0.5}, force = "player"}))
-  local spec = ModelTests.spec(fixture.belt, fixture.belt_direction)
-  spec.running_speed = actor.character_running_speed
-  local field = assert(Motion.field(spec))
-  return {surface = surface, actor = actor, fixture = fixture, field = field,
-    started_tick = game.tick, samples = 0, timeline = {}, assertions = {},
-    metrics = {mode = fixture.mode, relationship = fixture.relationship, pair = fixture.pair,
-      belt = fixture.belt, belt_direction = fixture.belt_direction, command_direction = fixture.direction,
-      actual_belt_count = count, actor_profile = spec.actor_profile, model_id = Motion.id,
-      corridor_half_width = Fixtures.corridor_half_width, actual_distance = 0,
-      max_cross_track_error = 0, direction_switches = 0, max_velocity_model_error = 0,
-      native_execution = true, production_profile_modified = false}}
+  return Probe.arm({surface = surface, actor = actor, fixture = fixture}, game.tick)
 end
 
 local function finish(probe, status, reason)
@@ -52,7 +57,7 @@ local function finish(probe, status, reason)
   m.endpoint_error = PathMath.distance(probe.actor.position, probe.goal)
   m.final_cross_track_error = math.abs(Trajectory.cross_track_error(probe.actor.position, probe.start, probe.goal))
   m.arrival_tolerance = Follower.tolerance(probe.actor)
-  m.corridor_retained = m.max_cross_track_error <= Fixtures.corridor_half_width + 1e-10
+  m.corridor_retained = m.max_cross_track_error <= m.corridor_half_width + 1e-10
   expect(probe, "native-arrival-not-tick-limit", status == "arrived")
   expect(probe, "uniform-field-retained", not probe.left_field)
   expect(probe, "native-velocity-agrees-with-measured-field", m.max_velocity_model_error <= 1e-10,
@@ -66,7 +71,7 @@ local function finish(probe, status, reason)
       / (edge.controls[1].lateral - edge.controls[2].lateral) end
     m.predicted_travel_ticks = edge.travel_ticks
     m.prediction_tick_error = math.abs(probe.samples - edge.travel_ticks)
-    m.prediction_tick_error_bound = (m.arrival_tolerance + math.abs(slope) * Fixtures.corridor_half_width)
+    m.prediction_tick_error_bound = (m.arrival_tolerance + math.abs(slope) * m.corridor_half_width)
       / edge.forward_speed + 1
     m.control_mix = edge.controls
     expect(probe, "time-prediction-inside-derived-terminal-and-corridor-bound",
@@ -86,10 +91,10 @@ function Probe.on_tick(probe)
   if not probe.start then
     -- Passive belt movement before the first command is excluded from both
     -- paired measurements; the exact command origin is included in the report.
-    probe.start = copy(p)
-    local axis = Trajectory.direction_vector(f.direction)
-    probe.goal = {x = p.x + Fixtures.distance * axis.x, y = p.y + Fixtures.distance * axis.y}
-    probe.controller = assert(Controller.begin(probe.start, probe.goal, probe.field, Fixtures.corridor_half_width))
+    local command = assert(Command.resolve(f, p, Fixtures.distance, Fixtures.corridor_half_width, probe.saved_command))
+    probe.start, probe.goal = command.start, command.goal
+    m.corridor_half_width, m.command_source = command.corridor_half_width, command.source
+    probe.controller = assert(Controller.begin(probe.start, probe.goal, probe.field, m.corridor_half_width))
     probe.follower = {path = {copy(probe.goal)}, waypoint_index = 1, segment_start = copy(probe.start)}
     m.start_position, m.goal_position = copy(probe.start), copy(probe.goal)
   elseif probe.previous then

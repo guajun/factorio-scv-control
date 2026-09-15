@@ -43,6 +43,8 @@ Completed foundations and upcoming automatic gates, dynamic-world invalidation, 
 
 The [domain execution design](docs/navigation-domain-execution-plan.md) specifies gate opening actions, remaining-corridor invalidation, and measured belt compensation, including the boundaries between isolated experiments and production planner integration. Run `tools/test.ps1 -Suite execution` for their repeated headless checks.
 
+The [saved-map testbench](docs/save-backed-testbench.md) retains openable source ZIPs for all 45 native domain cases. `tools/test.ps1 -Suite savebench` reloads those exact maps before executing current code; source hashes, native outcomes and live script performance are correlated. `-Suite stepped` separately proves native clock control around external solver waits. Both are in the fully headless `all` suite; GUI launch remains an explicit manual action.
+
 Navigation profile schemas, registry ownership, capability validation, and storage boundaries are documented in the [navigation extension contract](docs/navigation-extension-contract.md).
 
 Create or refresh the interactive test save with:

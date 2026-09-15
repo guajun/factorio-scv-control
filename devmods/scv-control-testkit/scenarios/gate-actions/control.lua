@@ -1,5 +1,6 @@
 local Fixtures = require("__scv-control-testkit__/calibration/gate_actions/fixtures")
 local Probe = require("__scv-control-testkit__/calibration/gate_actions/probe")
+local ReplayContract = require("__scv-control-testkit__/calibration/gate_actions/replay_contract")
 
 remote.add_interface("scv_test_runner", {active = function() return true end})
 script.on_init(function()
@@ -8,7 +9,13 @@ end)
 script.on_event(defines.events.on_tick, function()
   local suite = storage.scv_gate_actions
   if suite.finished then return end
-  if not suite.probe then suite.probe = Probe.start(Fixtures.cases[1], 1); return end
+  if not suite.probe then
+    suite.probe = Probe.start(Fixtures.cases[1], 1)
+    for _, assertion in ipairs(ReplayContract.run(suite.probe)) do
+      suite.probe.assertions[#suite.probe.assertions + 1] = assertion
+    end
+    return
+  end
   local result = Probe.on_tick(suite.probe)
   if not result then return end
   suite.cases[#suite.cases + 1] = result

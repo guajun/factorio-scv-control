@@ -23,6 +23,17 @@ The native calibration/topology wave is PR #19, stacked on the unmerged PR #18 f
 
 ## Goals
 
+The saved-map layer in `codex/save-backed-testbench` makes native source artifacts
+an additional acceptance boundary. Its 45 gate/dynamic/belt maps are published
+before the command, then loaded from unchanged ZIPs in fresh headless processes.
+Observed facts and derived-data bindings retain the source identity; replay
+recompiles current algorithms without rebuilding geometry. The separate external
+solver test loads a real long-wall save and uses native exact clock stepping
+around solver waits. Both suites run in `all`. See the
+[source-map contract](save-backed-testbench.md) for coverage and the distinction
+between real-map performance and paused correctness. Pure or derived-model
+success never substitutes for final native execution.
+
 1. Production and evaluation execute the same planning state machine in the same request order.
 2. World model, candidate providers, post-processing, validation, cost, selection, trajectory, and replan policy can be combined through static profiles.
 3. Static planning quality and complete movement episodes are separate, machine-readable evals.
