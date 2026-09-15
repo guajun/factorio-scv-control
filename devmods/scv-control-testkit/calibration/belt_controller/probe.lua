@@ -5,6 +5,7 @@ local Controller = require("__factorio-scv-control__/scripts/navigation/motion/u
 local Follower = require("__factorio-scv-control__/scripts/follower")
 local Trajectory = require("__factorio-scv-control__/scripts/trajectory")
 local PathMath = require("__factorio-scv-control__/scripts/path_math")
+local Command = require("calibration.belt_controller.command")
 local Probe = {}
 local SURFACE = "scv-belt-controller"
 local function copy(p) return PathMath.copy_position(p) end
@@ -52,7 +53,7 @@ local function finish(probe, status, reason)
   m.endpoint_error = PathMath.distance(probe.actor.position, probe.goal)
   m.final_cross_track_error = math.abs(Trajectory.cross_track_error(probe.actor.position, probe.start, probe.goal))
   m.arrival_tolerance = Follower.tolerance(probe.actor)
-  m.corridor_retained = m.max_cross_track_error <= Fixtures.corridor_half_width + 1e-10
+  m.corridor_retained = m.max_cross_track_error <= m.corridor_half_width + 1e-10
   expect(probe, "native-arrival-not-tick-limit", status == "arrived")
   expect(probe, "uniform-field-retained", not probe.left_field)
   expect(probe, "native-velocity-agrees-with-measured-field", m.max_velocity_model_error <= 1e-10,
@@ -66,7 +67,7 @@ local function finish(probe, status, reason)
       / (edge.controls[1].lateral - edge.controls[2].lateral) end
     m.predicted_travel_ticks = edge.travel_ticks
     m.prediction_tick_error = math.abs(probe.samples - edge.travel_ticks)
-    m.prediction_tick_error_bound = (m.arrival_tolerance + math.abs(slope) * Fixtures.corridor_half_width)
+    m.prediction_tick_error_bound = (m.arrival_tolerance + math.abs(slope) * m.corridor_half_width)
       / edge.forward_speed + 1
     m.control_mix = edge.controls
     expect(probe, "time-prediction-inside-derived-terminal-and-corridor-bound",
@@ -86,10 +87,10 @@ function Probe.on_tick(probe)
   if not probe.start then
     -- Passive belt movement before the first command is excluded from both
     -- paired measurements; the exact command origin is included in the report.
-    probe.start = copy(p)
-    local axis = Trajectory.direction_vector(f.direction)
-    probe.goal = {x = p.x + Fixtures.distance * axis.x, y = p.y + Fixtures.distance * axis.y}
-    probe.controller = assert(Controller.begin(probe.start, probe.goal, probe.field, Fixtures.corridor_half_width))
+    local command = assert(Command.resolve(f, p, Fixtures.distance, Fixtures.corridor_half_width, probe.saved_command))
+    probe.start, probe.goal = command.start, command.goal
+    m.corridor_half_width, m.command_source = command.corridor_half_width, command.source
+    probe.controller = assert(Controller.begin(probe.start, probe.goal, probe.field, m.corridor_half_width))
     probe.follower = {path = {copy(probe.goal)}, waypoint_index = 1, segment_start = copy(probe.start)}
     m.start_position, m.goal_position = copy(probe.start), copy(probe.goal)
   elseif probe.previous then

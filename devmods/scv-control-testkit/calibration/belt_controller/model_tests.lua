@@ -1,5 +1,6 @@
 local Motion = require("__factorio-scv-control__/scripts/navigation/motion/measured_uniform")
 local Controller = require("__factorio-scv-control__/scripts/navigation/motion/uniform_controller")
+local Command = require("calibration.belt_controller.command")
 local Tests = {}
 
 function Tests.spec(belt, direction)
@@ -76,6 +77,28 @@ function Tests.run()
   }, {native_execution = false, graph_routes_enumerated = 2, search_implemented = false,
     ground_distance = short.distance, ground_ticks = short.cost,
     detour_distance = longer_distance, detour_ticks = longer_cost, reverse_detour_ticks = reverse_cost})
+
+  local saved = {start = {x = 0.5, y = 0.5}, goal = {x = 0.5, y = 3.5}, corridor_half_width = 0.3}
+  local original = assert(Command.resolve({direction = 8}, saved.start, 8, 0.25, saved))
+  -- Deliberately change every generated-probe default. The same saved task
+  -- still asks for the old endpoint and width, rather than accepting a run to
+  -- some newly selected destination under the original snapshot hash.
+  local changed = assert(Command.resolve({direction = 4}, saved.start, 17, 0.75, saved))
+  local mismatch, reason = Command.resolve({direction = 8}, {x = 0.75, y = 0.5}, 8, 0.25, saved)
+  local generated = assert(Command.resolve({direction = 4}, saved.start, 8, 0.25))
+  record("saved-map-command-remains-the-task", {
+    {name = "saved-goal-survives-changed-distance-and-direction-defaults",
+      passed = changed.goal.x == original.goal.x and changed.goal.y == original.goal.y
+        and changed.goal.x == saved.goal.x and changed.goal.y == saved.goal.y},
+    {name = "saved-corridor-controls-admission-and-measurement",
+      passed = changed.corridor_half_width == saved.corridor_half_width
+        and original.corridor_half_width == saved.corridor_half_width},
+    {name = "saved-command-refuses-a-drifted-actor-origin",
+      passed = mismatch == nil and reason == "saved-command-origin-mismatch"},
+    {name = "unsaved-probes-retain-current-generated-defaults",
+      passed = generated.goal.x == 8.5 and generated.goal.y == 0.5 and generated.corridor_half_width == 0.25}
+  }, {native_execution = false, saved_goal = saved.goal, generated_goal = generated.goal,
+    saved_corridor_half_width = saved.corridor_half_width})
   return cases
 end
 

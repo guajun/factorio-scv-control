@@ -32,6 +32,11 @@ append("belt-controller", Belts, bounds(20, 20), function(fixture)
   return {x = 0.5, y = 0.5},
     {x = 0.5 + Belts.distance * axis.x, y = 0.5 + Belts.distance * axis.y}
 end, "authored-measured-uniform-control-or-production-follower")
+for _, case in ipairs(Catalog.cases) do
+  if case.domain == "belt-controller" then
+    case.scope.execution_constraints = {corridor_half_width = Belts.corridor_half_width}
+  end
+end
 
 function Catalog.get(id) return by_id[id] end
 function Catalog.describe()

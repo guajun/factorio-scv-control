@@ -43,6 +43,12 @@ function Adapters.begin(prepared, tick)
       local spec = MotionSpecs.spec(probe.fixture.belt, probe.fixture.belt_direction)
       spec.running_speed = probe.actor.character_running_speed
       probe.field = assert(Motion.field(spec))
+      local case = prepared.descriptor
+      local constraints = case.scope.execution_constraints
+      probe.saved_command = {start = case.start, goal = case.goal,
+        -- The first experimental corpus already saved this exact constraint in
+        -- its probe metrics. New sources bind it in the native facts metadata.
+        corridor_half_width = constraints and constraints.corridor_half_width or probe.metrics.corridor_half_width}
     end
     -- Clock reset is command state only. No entity creation, teleport, tile
     -- mutation or geometry factory is permitted in this replay path.
