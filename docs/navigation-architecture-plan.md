@@ -14,12 +14,12 @@ Updated 2026-09-15: base main `852349a`, plus the `codex/navigation-framework` i
 | Incremental world ([#7](https://github.com/guajun/factorio-scv-control/issues/7)) | Module and engine-backed assertions merged in PR #14. | Regional cache/event handling is not wired into production planning. Derived-backend commit synchronization is a separate extension. |
 | Gates, belts, corridor invalidation | [#8](https://github.com/guajun/factorio-scv-control/issues/8), [#9](https://github.com/guajun/factorio-scv-control/issues/9), [#10](https://github.com/guajun/factorio-scv-control/issues/10), [#2](https://github.com/guajun/factorio-scv-control/issues/2), [#11](https://github.com/guajun/factorio-scv-control/issues/11) remain open. | Real-domain calibration and production composition remain required. |
 | External solver boundary | Framework adds `scv-navigation/1`, committed captured-input generations, exact JSON export, imported/external providers, and shared validation/follower replay. | NavigationData is not a mesh builder; its staged delta tests do not prove production-world cache integration. |
-| Solver comparison | Python Dijkstra and A* consume the same captured graph; the offline runner replays their results in Factorio. | These are reference graph algorithms, not a third-party navigation library. Recast/portal representation and full setup-cost comparisons remain follow-up work. |
+| Solver comparison | Python Dijkstra/A* consume the same captured graph. The domain follow-up adds an optional extremitypathfinder/GEOS source-polygon backend; its ten complete routes pass native replay across the 11-case catalog. | Static stone-wall/tile domain only. Dynamic update, memory, larger worlds and live production integration remain follow-up work. |
 | Live test lab | Isolated headless host, server-only bulk snapshot file, short RCON control/result messages, fixture commands and GUI spectator adapter. | Test-map-only. Capture is still synchronous and cold per request. Not ordinary-save right-click replacement, arbitrary dynamic-world solving, or production deployment. |
 
 The original Phase 0 merge barrier is satisfied. The framework implements the additional boundary prerequisite for interchangeable search backends; broader domain and lifecycle gates remain explicit. Consult the newest experiment-log entry for executed tests and unresolved failures rather than interpreting a source module's presence as validation.
 
-The next parallel packages are [#16 live cached queries, test-map input and GUI lifecycle](https://github.com/guajun/factorio-scv-control/issues/16) (user-selected first priority) and [#17 third-party topology comparison](https://github.com/guajun/factorio-scv-control/issues/17). Gate/belt calibration can continue independently. Keep live transport and topology implementations isolated; the integration owner alone changes common registries/reports/default profiles.
+The active parallel wave is real-gate calibration (#8), native belt-motion calibration (#10), and third-party topology comparison (#17), built on the unmerged PR #18 framework. The user accepted the faster bulk transport as sufficient to unblock these experiments; remaining #16 latency work is not their prerequisite. #16 still owns cached queries, test-map input and GUI lifecycle. Keep live transport and topology implementations isolated; the integration owner alone changes common registries/reports/default profiles. See [project progress](project-progress.md) for branch/validation boundaries.
 
 ## Goals
 
@@ -408,10 +408,10 @@ Each work package must contain:
 
 ## Immediate backlog
 
-1. Integration owner: implement boundary package A with query-time objective, data identity, per-provider capabilities, units, and completion/admission conformance tests.
-2. Calibration owners: continue real gates (#8) and belt displacement (#10) independently; freeze exact fixtures and measured acceptance bounds.
-3. Eval owner after A: implement bounded snapshot/query capture and offline imported-route replay (B), starting with fixture-v4 clearance and detour regressions. Preserve GUI preview through the same artifacts.
-4. After B: compare an external reference graph solver and a portal/Recast backend (C); separately probe headless RCON lifecycle (D). Keep the geometry/objective differences visible in reports.
+1. Integration owner: review the already implemented A/B foundation in PR #18 and keep its existing production behavior and measured regression baselines intact. It remains unmerged; stacked experiments must state this dependency.
+2. Calibration owners: finish real gates (#8) and belt displacement (#10) independently. First bounded native probes are in the domain-calibration wave, not production gate/belt policy; circuit/equipment/entry-exit/dynamic cases remain explicit.
+3. Topology owner: implement one pinned third-party source-geometry backend (#17), compare every fixture-v4 case and replay through shared validation/follower. Do not attribute graph representation changes to a language change.
+4. Live owner: continue #16 committed-map reuse, bounded capture, test-map input, pending-world changes and GUI lifecycle. Bulk-file transport already removes the 1,128-command transfer bottleneck; cold end-to-end latency remains roughly ten seconds in the diagnostic probe.
 5. World/execution owners: wire regional revisions and corridor invalidation (#11), implement calibrated semantic gates (#9), and route actions. Test proactive recovery separately from the preserved failure baseline.
 6. Motion owner: implement #2 using query-time directed cost, justified bounds, objective-preserving post-processing, and calibrated native controller feasibility; then exercise supported local/external profiles (E).
 

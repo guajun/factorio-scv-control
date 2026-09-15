@@ -1,0 +1,6 @@
+# Reproduce the tested Windows AMD64 / CPython 3.12 binary environment.
+# pip install --require-hashes --only-binary=:all: -r requirements-win-py312.lock
+extremitypathfinder==2.7.2 --hash=sha256:e17d6a3f29d54b240825450e3dac2fc332bfdff62c8247bcddcc007fa38f7151
+numpy==1.26.4 --hash=sha256:08beddf13648eb95f8d867350f6a018a4be2e5ad54c8d8caed89ebca558b2818
+networkx==3.5 --hash=sha256:0030d386a9a06dee3565298b4a734b68589749a544acbb6c412dc9e2489ec6ec
+shapely==2.1.2 --hash=sha256:743044b4cfb34f9a67205cee9279feaf60ba7d02e69febc2afc609047cb49179
