@@ -64,7 +64,49 @@ spells out representation, planning, execution and the combined-domain test.
 #16 can optimize warm-query latency independently. No GitHub Actions or automatic
 GUI launch is introduced; GUI preview/join capability remains explicit/manual.
 
-## Execution wave validation
+## Saved-map follow-up validation
+
+The final `pwsh -NoProfile -File .\tools\test.ps1 -Suite all -KeepArtifacts`
+passes after the saved-evidence and variable-save-shard fixes. Factorio 2.0.77
+runs the original smoke, 109 integration assertions, 11 x 10 static benchmark,
+three historical episodes, repeated 6 gate / 56 belt calibrations, 11 interchange
+assertions and seven realtime live checks. The repeated execution matrix is now
+62 cases / 356 assertions per repetition: gates 10/72, dynamic 18/89 and belts
+34/195. Seventy host tests pass, including source identity and publication
+regressions.
+
+All 45 unchanged source ZIPs then pass fresh-process replay, with actual loaded
+facts, zero geometry-builder calls and one current derived-state compile. Their
+denominator is 38 arrivals, three eligibility rejections and four precondition
+invalidations. The separate saved long-wall external run passes 16 stepped
+checks and arrives in 124 native travel ticks. Capture takes 3,143.2 ms, solver
+1,084.4 ms and total frozen wall time 6,392.9 ms, with zero game ticks during
+that wait. This is correctness evidence, explicitly not realtime qualification.
+
+Real-map performance remains a failing promotion gate: the five dynamic cases
+all exceed the 16.667 ms single-hook reference budget. Final maxima are
+140.0633 ms (inserted wall), 31.1198 ms (off-route), 45.2569 ms (behind),
+166.8624 ms (removed-wall detour), and 39.7833 ms (forward belt edit).
+Their movement-hook p95 is 0.0607–0.1428 ms. These measurements identify expensive
+synchronous planning callbacks on loaded maps; they are not full-engine CPU
+profiles or factory-scale benchmarks. Functional suite success does not erase
+this performance failure.
+
+Authoritative maps: `F:\factorio-scv-testbench\corpora\v1-20260915-174358-8e2cde`.
+The local `F:\factorio-scv-testbench\README.md` gives manual open commands.
+Final retained artifacts under local temp:
+
+- `factorio-scv-agent-test-b889d6ddae3f4483947267c6946fb1bc`: main suite.
+- `scv-calibration-8xsyjogi`: original repeated physical calibration.
+- `scv-calibration-79d5oooq`: repeated execution and stale-evidence regressions.
+- `scv-savebench-79riqaks/savebench-results.json`: all 45 correlated source replays and performance.
+- `factorio-scv-live-7a6np3j2`: ordinary realtime loop.
+- `factorio-scv-live-9w056y05`: stepped loop, actual source ZIP and exact copied mods.
+
+No graphical Factorio client was launched. Save publication and stale-evidence
+failures are preserved in the newest [experiment entry](pathfinding-experiments.md).
+
+## Prior execution wave validation
 
 The integrated `pwsh -NoProfile -File .\tools\test.ps1 -Suite all -KeepArtifacts`
 passes on Factorio 2.0.77. It includes smoke, 109 engine integration assertions,

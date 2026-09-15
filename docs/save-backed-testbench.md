@@ -42,6 +42,12 @@ than rebuilding the fixture before solving.
 
 ## Commands and artifacts
 
+The validated local v1 corpus is
+`F:\factorio-scv-testbench\corpora\v1-20260915-174358-8e2cde`.
+`F:\factorio-scv-testbench\README.md` provides a short Chinese opening guide.
+Its default `open-save.ps1` selects `same-force-normal-follower`; use `-Save`
+with another manifest filename to choose a different case.
+
 ```powershell
 # Run native source-save replay; author a full corpus only if none exists.
 pwsh -NoProfile -File .\tools\test.ps1 -Suite savebench
@@ -159,3 +165,10 @@ original saved probe's width for the first corpus). A model regression changes
 current defaults and verifies that the stored command remains unchanged; an
 actor that moved away from its recorded start is rejected. Recompiling an
 algorithm must not redefine its test input.
+
+Independent review also caught stored probe assertions and provenance surviving
+reload. Gate and belt probes now share an `arm` operation that creates fresh
+assertions, timelines, metrics and algorithm state from the persisted native
+objects. Regression checks deliberately change the current validator answer
+and model/calibration identity: a saved passing verdict cannot override a new
+failure or describe the new run with the old model's identity.
