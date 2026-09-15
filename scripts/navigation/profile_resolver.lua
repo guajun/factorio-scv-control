@@ -2,6 +2,7 @@ local Contracts = require("scripts.navigation.contracts")
 local Profiles = require("scripts.navigation.profiles.init")
 local Registries = require("scripts.navigation.registries.init")
 local Serializable = require("scripts.navigation.serializable")
+local Boundary = require("scripts.navigation.solver_boundary")
 
 local ProfileResolver = {}
 
@@ -119,6 +120,23 @@ function ProfileResolver.preflight_profile(profile, values)
     })
   end
 
+  local query_config = profile.config and profile.config.navigation_query
+  if query_config then
+    if type(query_config) ~= "table" or type(query_config.required) ~= "boolean"
+        or (query_config.objective ~= "distance" and query_config.objective ~= "travel-time") then
+      return nil, resolution_error("invalid-query-profile", profile.id)
+    end
+    for _, definition in ipairs(stages.candidate_providers) do
+      local supported = false
+      for _, objective in ipairs(definition.query_support and definition.query_support.objectives or {}) do
+        if objective == query_config.objective then supported = true end
+      end
+      if not supported then
+        return nil, resolution_error("unsupported-provider-objective", profile.id, {component_id = definition.id})
+      end
+    end
+  end
+
   local profile_copy, profile_copy_error = copy(profile)
   if not profile_copy then
     return nil, resolution_error("invalid-profile", profile.id, {
@@ -140,6 +158,23 @@ function ProfileResolver.preflight_profile(profile, values)
     stages = stages,
     capabilities = sorted_keys(capabilities)
   }
+end
+
+function ProfileResolver.preflight_query(reference, query)
+  local preflight, detail = ProfileResolver.preflight(reference)
+  if not preflight then return nil, detail end
+  local valid
+  valid, detail = Boundary.validate_query(query)
+  if not valid then return nil, detail end
+  local config = preflight.profile.config and preflight.profile.config.navigation_query
+  if not config or config.objective ~= query.objective.id then
+    return nil, resolution_error("profile-objective-mismatch", reference.profile_id)
+  end
+  for _, definition in ipairs(preflight.stages.candidate_providers) do
+    valid, detail = Boundary.check_capabilities(query, definition)
+    if not valid then return nil, detail end
+  end
+  return preflight
 end
 
 function ProfileResolver.preflight(reference)

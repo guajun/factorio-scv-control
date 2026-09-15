@@ -4,6 +4,62 @@ Navigation composition is static and data-driven. Profiles and runtime reference
 plain serializable tables; implementations are resolved from fixed registries after a
 save is loaded. The initial schema version is `1`.
 
+This document describes implemented Lua contracts, including the bounded external
+boundary below. The [solver boundary](navigation-solver-boundary.md) separates the
+implemented subset from longer-term domain and backend requirements. Plain-table
+serializability alone does not implement that boundary.
+
+## Implemented boundary extension (`scv-navigation/1`)
+
+The framework now has an independently versioned external value contract in
+`scripts/navigation/solver_boundary.lua`. `NavigationData` stores committed bounded
+snapshots and stages revisioned deltas; it does not build meshes. A query binds actor,
+endpoints, session/command/attempt, backend generation, source checksum, objective units,
+capabilities and budget. Snapshot and query content are immutable for that request.
+
+`ProfileResolver.preflight_query` checks every provider's supported objective, backend,
+and required capabilities. `interchange-distance-v1` accepts recorded results;
+`external-distance-v1` adds callback-based asynchronous completion. Both use the shared
+collision/trajectory validators, scorer, selector, and native follower. Neither claims
+calibrated gate actions, belts, a mesh backend, or travel-time execution yet. The offline
+Python graph solver can compare directed travel-time objectives in synthetic graphs.
+
+`PlanningRun.start` accepts `specification.navigation_query`. Runtime services provide
+`navigation_snapshot`, `navigation_data_ref`, and either `solver_result` for import or
+`request_solver(query)` for asynchronous submission. Its nonempty string token is
+completed through `PlanningRun.handle_solver_result(run, {id=token,
+provider_id="external-route", result=result}, runtime)`. Engine and external completion
+channels cannot satisfy one another. `fail_pending` closes a transport failure; normal
+`cancel` prevents late replies from reactivating a route. The transport owner remains
+responsible for its watchdog and discarding process-local work.
+
+Existing Lua schema-v1 terminal statuses remain unchanged. External detail is retained
+in `planning_result.values.solver_outcome`: partial/budget/unsupported/error become
+`failed`, cancellation becomes `cancelled`, and a scoped solver `no-path` remains
+`no-path`. These outcomes are never presented as arrival. Per-route objective values
+and units are recorded under `route.values.scored_objective`; geometric distance is
+always computed separately.
+
+Captured queries separate `goal_tolerance` (solver endpoint eligibility) from
+`execution.arrival_tolerance` (the existing speed-dependent native follower
+stopping bound). Replay checks the latter against `Follower.tolerance(actor)`;
+an imported query cannot enlarge it. Reports retain both actual arrival error and
+the pinned execution bound. This exposes existing controller behavior, not a new
+tuning value or a relaxed assertion after movement.
+
+The new profiles preserve imported points without geometric smoothing. This makes the
+raw versus accepted comparison explicit and avoids unimplemented objective/transition
+preservation promises. Validators consume any candidate route; declaring it safe before
+validation is no longer a registry prerequisite. `production-v1` retains its existing
+smoothing, provider order and selection behavior.
+
+Use `canonical.lua` for cross-language value identity and `wire_json.lua` for
+hash-sensitive export. The normal Factorio JSON writer can round binary64 values:
+its output is unsuitable for exact snapshot identity. `scv-c14n1-adler32` is a
+non-cryptographic content checksum, with plain Lua empty objects/arrays normalized
+to the same representation. Identity checks and live collision validation remain
+required regardless of the checksum.
+
 ## Storage boundary
 
 Production storage contains only the selected profile ID and serializable run values:

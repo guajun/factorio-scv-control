@@ -2,6 +2,25 @@
 
 This plan turns SCV Control from a collection of named planner variants into a composable navigation system that can be evaluated headlessly against real Factorio behavior. The target is SC2-like responsiveness for one commanded character, not a claim to reproduce StarCraft II internals.
 
+Updated 2026-09-15: base main `852349a`, plus the `codex/navigation-framework` implementation. The [game navigation research](navigation-industry-research.md) records primary sources and design implications. The [external solver boundary](navigation-solver-boundary.md) distinguishes the implemented bounded subset from remaining target capabilities. Test evidence is recorded in the experiment log; unimplemented domain features are not implied by the new transport.
+
+## Implementation checkpoint
+
+| Work | Implementation status | Remaining boundary |
+| --- | --- | --- |
+| Phase 0 contracts and registries ([#4](https://github.com/guajun/factorio-scv-control/issues/4)) | Merged in PR #13. | Version 1 describes the local Lua pipeline; it is not an external problem/response protocol. |
+| Shared PlanningRun ([#5](https://github.com/guajun/factorio-scv-control/issues/5)) | Merged in PR #15; framework adds separate external completion tokens, pinned queries, and per-provider capability checks. | Production retains its original profile. External profiles currently execute only static distance objectives. |
+| Headless episodes ([#6](https://github.com/guajun/factorio-scv-control/issues/6)) | Merged in PR #12; included in `-Suite all`. Shared PlanningRun and production Follower execute through an episode adapter. | Session orchestration is still adapter glue, not a fully extracted production NavigationSession. The inserted-wall case expects `failed/no-safe-candidate`; a passing suite does not demonstrate dynamic recovery. |
+| Incremental world ([#7](https://github.com/guajun/factorio-scv-control/issues/7)) | Module and engine-backed assertions merged in PR #14. | Regional cache/event handling is not wired into production planning. Derived-backend commit synchronization is a separate extension. |
+| Gates, belts, corridor invalidation | [#8](https://github.com/guajun/factorio-scv-control/issues/8), [#9](https://github.com/guajun/factorio-scv-control/issues/9), [#10](https://github.com/guajun/factorio-scv-control/issues/10), [#2](https://github.com/guajun/factorio-scv-control/issues/2), [#11](https://github.com/guajun/factorio-scv-control/issues/11) remain open. | Real-domain calibration and production composition remain required. |
+| External solver boundary | Framework adds `scv-navigation/1`, committed captured-input generations, exact JSON export, imported/external providers, and shared validation/follower replay. | NavigationData is not a mesh builder; its staged delta tests do not prove production-world cache integration. |
+| Solver comparison | Python Dijkstra and A* consume the same captured graph; the offline runner replays their results in Factorio. | These are reference graph algorithms, not a third-party navigation library. Recast/portal representation and full setup-cost comparisons remain follow-up work. |
+| Live test lab | Isolated headless host, server-only bulk snapshot file, short RCON control/result messages, fixture commands and GUI spectator adapter. | Test-map-only. Capture is still synchronous and cold per request. Not ordinary-save right-click replacement, arbitrary dynamic-world solving, or production deployment. |
+
+The original Phase 0 merge barrier is satisfied. The framework implements the additional boundary prerequisite for interchangeable search backends; broader domain and lifecycle gates remain explicit. Consult the newest experiment-log entry for executed tests and unresolved failures rather than interpreting a source module's presence as validation.
+
+The next parallel packages are [#16 live cached queries, test-map input and GUI lifecycle](https://github.com/guajun/factorio-scv-control/issues/16) (user-selected first priority) and [#17 third-party topology comparison](https://github.com/guajun/factorio-scv-control/issues/17). Gate/belt calibration can continue independently. Keep live transport and topology implementations isolated; the integration owner alone changes common registries/reports/default profiles.
+
 ## Goals
 
 1. Production and evaluation execute the same planning state machine in the same request order.
@@ -10,6 +29,8 @@ This plan turns SCV Control from a collection of named planner variants into a c
 4. Walls, buildings, gates, belts, and tiles update navigation state without rebuilding the whole world.
 5. The default test command stays fully headless and finishes on semantic terminal conditions.
 6. Module boundaries and file ownership allow several agents to work in parallel after the shared contracts land.
+7. Navigation data, search filters/objectives, and execution have explicit contracts that work for local and external solvers.
+8. Comparisons include representation loss, update/setup cost, incomplete results, and real movement outcomes.
 
 ## Verified Factorio constraints
 
@@ -35,11 +56,14 @@ The existing fixtures named `gate-open` and `gate-closed` contain only a wall ga
 
 ```text
 Move command
-  -> NavigationWorld view + revision set
-  -> candidate providers (async or sync)
-  -> route post-processors
-  -> validators
-  -> cost model
+  -> NavigationWorld facts + coverage + revision set
+  -> NavigationData backend build/update -> committed generation
+  -> NavigationQuery (actor, filter, directed objective, budget)
+  -> candidate providers (local or external, async or sync)
+  -> correlated result admission (identity, coverage, status, freshness)
+  -> route post-processors (preserve objective and transitions)
+  -> live collision / trajectory / conditional-transition validators
+  -> final cost under the query objective
   -> selector
   -> accepted Route/Corridor
   -> route action executor
@@ -47,7 +71,7 @@ Move command
   -> invalidation / local avoidance / replan policy
 ```
 
-The current `path = {positions...}` value becomes a richer route while retaining positions for rendering and legacy callers:
+The richer route contract already retains positions for rendering and legacy callers. This abbreviated target shape illustrates the additional data to populate; versioned implementation rules live in the extension contract:
 
 ```lua
 {
@@ -63,6 +87,26 @@ The current `path = {positions...}` value becomes a richer route while retaining
 }
 ```
 
+### NavigationData and committed queries
+
+`NavigationWorld` owns observed geometry and semantics; a `NavigationData` backend owns the derived grid, portals, mesh, or opaque engine query representation. Its identity includes source snapshot/revisions, actor envelope, build settings, and generation. A received world update becomes queryable only when its derived generation is committed. Do not join cells or polygons from partially updated generations.
+
+Export observed facts with explicit bounds and unknown geometry. Preserve the original facts alongside optional derived grids so a portal/navmesh experiment does not inherit the current grid's lost clearance. Backend-specific references remain scoped to their generation; routes also carry portable region/entity dependencies. An opaque Factorio engine backend declares unavailable information instead of manufacturing mesh references or revision guarantees.
+
+### QueryPolicy and objective consistency
+
+Search receives traversability filters, conditional actions, objective ID/units, directed cost data, coverage, and resource limits. Final route scoring uses the same objective after all geometry changes. A geometry-only provider can remain a labelled control, but cannot claim directed travel-time search because another provider in its profile supplies that capability.
+
+The current distance-based search ellipse cannot bound a longer-but-faster belt route. Travel-time profiles must use a justified time/speed bound or explicit bounded coverage, with incomplete coverage reported. Heuristic admissibility, budget/approximation, and post-processing must be declared per profile. A zero-heuristic search is the reference when a lower bound is unproven. Geometric smoothing must not discard a favorable belt or mandatory gate transition.
+
+Keep objective value, units, distance, predicted ticks, and measured ticks separate. The framework now recomputes geometric `predicted.distance` independently and records query score/units in `route.values.scored_objective`. A live time scorer and calibrated motion model are still required before enabling a travel-time execution profile.
+
+### External solver and authoritative execution
+
+Implement external libraries behind a Lua provider adapter. Start with bounded snapshot/query export and offline result replay, then prove a headless RCON completion path. UDP and live GUI connectivity require their own exact-version probes. The default local profile remains self-contained, and the default test command remains GUI-free.
+
+The [boundary design](navigation-solver-boundary.md) defines request/session identity, committed generations, partial/budget/no-path distinctions, cancellation, save/load, provider capability checks, live validation, and recorded replay. External answers use the same acceptance and follower pipeline. A solver's success means a complete candidate was produced; only Factorio movement can establish episode arrival.
+
 ### World revisions
 
 World changes are not one undifferentiated dirty flag:
@@ -70,7 +114,7 @@ World changes are not one undifferentiated dirty flag:
 | Revision | Examples | Default response |
 | --- | --- | --- |
 | `topology` | Wall/building/gate placement or removal, collision-changing tiles | Invalidate a route only if its corridor depends on the dirty region. |
-| `motion` | Belt placement, removal, rotation or upgrade; walking-speed tile changes | Existing route remains valid; re-optimize only when predicted benefit justifies it. |
+| `motion` | Belt placement, removal, rotation or upgrade; walking-speed tile changes | Refresh motion prediction and controller feasibility. Geometric connectivity may remain valid; optional cost optimization is distinct from a required response to unsafe drift. |
 | `transient` | Friendly gate opening/closing, temporary nearby unit | Route stays valid; route actions or local steering respond. |
 
 Moving units do not continuously mutate the static navigation world. They belong to local steering unless they remain blocking long enough for replan policy to promote the obstruction.
@@ -82,7 +126,7 @@ Profiles store serializable IDs and values, not functions. Factorio storage keep
 ```lua
 {
   id = "production-v1",
-  world_model = "regional-grid-v1",
+  world_model = "live-surface-local-grid-v1",
   candidate_providers = {
     "engine-normal",
     "engine-inflated",
@@ -90,14 +134,16 @@ Profiles store serializable IDs and values, not functions. Factorio storage keep
   },
   postprocessors = {"safe-string-pull"},
   validators = {"actor-collision", "trajectory-envelope"},
-  cost_model = "travel-time-v1",
+  cost_model = "polyline-distance-v1",
   selector = "least-cost-safe",
   trajectory = "vector16-v1",
-  replan_policy = "revision-aware-v1"
+  replan_policy = "stuck-retry-v1"
 }
 ```
 
 Registry families should be separate files so adding a cost model does not conflict with adding a follower. A profile must declare capability requirements such as directed edge costs, gate actions, or corridor dependencies. Invalid combinations fail before an eval starts.
+
+The example above abbreviates the implemented `production-v1` profile. Future backend/query-policy composition and travel-time behavior use a new profile and explicitly versioned schema changes; do not silently redefine `production-v1`. See the [implemented extension contract](navigation-extension-contract.md) for current fields, and the [boundary draft](navigation-solver-boundary.md) for proposed per-provider capability checks.
 
 ## Gates are conditional transitions
 
@@ -136,6 +182,8 @@ cost(A -> B) != cost(B -> A)
 
 The first cost model should predict travel ticks by combining commanded character motion with the belt vector along each edge. It must respect belt immunity and record its prediction separately from measured episode time.
 
+The model must also check whether native controls can realize the directed edge under lateral drift. A vector projection giving favorable forward speed is insufficient if the actor cannot remain in the corridor. Use the calibrated motion model in search, trajectory validation, and episode prediction. Record geometry-only controls explicitly.
+
 Required belt fixtures:
 
 | Fixture | Expected property |
@@ -165,7 +213,7 @@ It must call the same `PlanningRun` state machine used by production. In particu
 
 ### Navigation episodes
 
-A new headless suite executes the accepted route with the real character and follower. Episode actions are triggered by state conditions, never by assuming success after a fixed tick count.
+The merged headless episode suite executes the accepted route with the real character and follower. Episode actions are triggered by state conditions, never by assuming success after a fixed tick count. The sequence below describes the target shared session; current production and episode adapters still own some separate orchestration glue.
 
 ```text
 setup fixture
@@ -176,13 +224,13 @@ setup fixture
   -> finish at arrived/no-path/failed terminal state
 ```
 
-Target command:
+Available command:
 
 ```powershell
 pwsh -NoProfile -File .\tools\test.ps1 -Suite episodes
 ```
 
-`-Suite all` will run smoke, integration, planning benchmark, and episodes. Tick limits remain deadlock guards only.
+`-Suite all` runs smoke, integration, planning benchmark, and episodes. Tick limits remain deadlock guards only. See the [episode module](../devmods/scv-control-testkit/episodes/README.md) for implemented fixture, service, and report contracts; the following metrics are the target catalog, not a claim that every domain metric is populated today.
 
 Episode reports include:
 
@@ -197,6 +245,14 @@ Episode reports include:
 - deterministic request sequence and per-stage work metrics.
 
 Reports use a versioned JSON schema and retain the isolated root on failure. Every fixture runs on a fresh/reset surface and asynchronous engine providers run serially unless a fixture explicitly tests scheduling.
+
+### Cross-backend comparison
+
+Keep static route quality and closed-loop execution as separate reports with common snapshot/query/profile identities. A captured GUI case exports the same fixture geometry used headlessly. Imported external results receive the same final validators, scorer, and follower; GUI preview adds no solver-specific acceptance path.
+
+Report source geometry and derived representation settings, raw/final routes, objective and units, coverage, partial/budget/unsupported outcomes, input hashes and versions, cold/warm build/update/search work, transport delay, validation cost, and measured arrival. Dijkstra on the same graph is an objective reference; Factorio is the execution oracle. Comparing algorithms on different graph resolutions must expose that difference rather than attribute all gains to search.
+
+The [research experiment matrix](navigation-industry-research.md#experiments-and-decision-gates) is planned work. Preserve known failures such as `wall-inserted-ahead` in the versioned baseline when adding a new profile that is expected to recover.
 
 ### Dynamic-world fixture catalog
 
@@ -216,6 +272,8 @@ Reports use a versioned JSON schema and retain the isolated root on failure. Eve
 
 ### Phase 0: Shared contracts and production-equivalent PlanningRun
 
+Status: complete on main through issues #4 and #5. The following criteria describe the original merge barrier; the external boundary extension is separate.
+
 - Define versioned profile, route, candidate, validator, metric, and terminal-result schemas.
 - Extract engine request sequencing and candidate collection from `scripts/planner.lua` into a shared `PlanningRun`.
 - Make production and TestKit invoke that exact state machine.
@@ -230,6 +288,8 @@ Exit criteria:
 
 ### Phase 1: Headless NavigationEpisode runner
 
+Status: baseline suite complete through issue #6. It uses shared PlanningRun/Follower with adapter-owned session glue. A fully shared NavigationSession remains integration work; dynamic recovery is not part of this phase's proven behavior.
+
 - Add condition-driven episode actions and terminal states.
 - Add versioned episode JSON and console completion protocol.
 - Run the current follower through the production NavigationSession.
@@ -243,6 +303,8 @@ Exit criteria:
 - no episode passes because a fixed number of ticks elapsed.
 
 ### Phase 2: Incremental NavigationWorld and gate semantics
+
+Status: issue #7's world module is merged; production event/cache integration and issues #8/#9 remain open.
 
 - Introduce regional topology/motion/transient revisions and dirty bounds.
 - Subscribe to player, robot, script-raised, death, rotation, tile, clone, and surface events.
@@ -262,7 +324,9 @@ Exit criteria:
 
 - Add directed `edge_cost`/motion queries to NavigationWorld.
 - Calibrate character displacement on belt tiers and directions in headless Factorio.
-- Add travel-time cost and predicted-versus-actual metrics.
+- Pass the calibrated objective into provider search and final scoring with explicit units.
+- Replace distance-only search bounds/heuristics where unjustified; preserve cost and actions through post-processing.
+- Add travel-time prediction, drift feasibility, and predicted-versus-actual metrics.
 - Implement the fixtures from [GitHub issue #2](https://github.com/guajun/factorio-scv-control/issues/2).
 
 Exit criteria:
@@ -288,16 +352,34 @@ Exit criteria:
 
 ### Phase 5: SC2-like topology and local steering experiments
 
-- Compare cached regional grid, clearance-aware portals, and navigation-mesh representations.
+- Compare cached regional grid, clearance-aware portals, and navigation-mesh backends on shared bounded source geometry.
+- Start with offline external-library adapters and recorded replay; prove a headless live transport before interactive external planning.
+- Compare graph-optimality, representation loss, and actual execution separately, including build/update cost.
 - Preserve explicit portal width for different actor envelopes.
 - Add local moving-unit steering and deadlock episodes.
 - Promote a new production profile only after episode and planning regressions pass.
 
 This phase replaces the current candidate portfolio as the primary topology solution; the engine candidates remain baselines and fallbacks.
 
+### Boundary extension: NavigationData, QueryPolicy, and solver interchange
+
+This work can start now; it does not require finishing every gate/belt feature. It establishes the additional contracts needed by Phase 3 and cross-backend Phase 5 experiments. Calibration in issues #8 and #10 can proceed independently.
+
+Deliver packages A through E from the [boundary design](navigation-solver-boundary.md#evaluation-and-implementation-packages): shared contract/admission changes; bounded capture/replay; solver comparison; live transport; domain composition. A is the new merge barrier. After A/B, independent solver and transport adapters can proceed alongside domain work.
+
+Exit criteria:
+
+- existing `production-v1` behavior and trace baselines remain reproducible;
+- provider-specific preflight rejects unsupported objective/backend combinations;
+- every answer identifies a committed world generation and active request;
+- timeout, partial output, malformed data, cancellation, and scoped no-path remain distinguishable;
+- imported routes pass shared live validation and native follower episodes;
+- default tests stay local/headless, with an explicit GUI replay/join path;
+- experiment reports include end-to-end work and failed cases, not only successful solver timings.
+
 ## Parallel development contract
 
-Phase 0 is the merge barrier. After its schemas land, work can split into three specialist lanes plus one integration owner:
+The original Phase 0 merge barrier has landed. Domain work can use the following lanes; extensions to backend/query/transport contracts first pass boundary package A. Package ownership in the boundary design refines these lanes for external experiments:
 
 | Lane | Owns | Avoids |
 | --- | --- | --- |
@@ -326,10 +408,11 @@ Each work package must contain:
 
 ## Immediate backlog
 
-1. Phase 0: define schemas and extract the production-equivalent `PlanningRun`.
-2. Phase 1: add the episode protocol with a mid-route wall as its first dynamic fixture.
-3. In parallel after the contract merge: build gate calibration episodes and belt displacement calibration.
-4. Implement semantic gates before switching the custom grid into production for gate-heavy maps.
-5. Implement issue #2 on top of directed edge cost, not as a special-case route bonus.
+1. Integration owner: implement boundary package A with query-time objective, data identity, per-provider capabilities, units, and completion/admission conformance tests.
+2. Calibration owners: continue real gates (#8) and belt displacement (#10) independently; freeze exact fixtures and measured acceptance bounds.
+3. Eval owner after A: implement bounded snapshot/query capture and offline imported-route replay (B), starting with fixture-v4 clearance and detour regressions. Preserve GUI preview through the same artifacts.
+4. After B: compare an external reference graph solver and a portal/Recast backend (C); separately probe headless RCON lifecycle (D). Keep the geometry/objective differences visible in reports.
+5. World/execution owners: wire regional revisions and corridor invalidation (#11), implement calibrated semantic gates (#9), and route actions. Test proactive recovery separately from the preserved failure baseline.
+6. Motion owner: implement #2 using query-time directed cost, justified bounds, objective-preserving post-processing, and calibrated native controller feasibility; then exercise supported local/external profiles (E).
 
 Do not add more named hybrid algorithms to the current benchmark state machine unless needed to preserve a historical baseline. New experiments belong in profiles executed by the shared runner.

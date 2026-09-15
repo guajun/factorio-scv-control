@@ -1,3 +1,5 @@
 local handler = require("event_handler")
 handler.add_lib(require("__factorio-scv-control__/scenarios/scv-control-test/test-lab"))
 handler.add_lib(require("pathfinding.runtime"))
+handler.add_lib(require("interchange.runtime"))
+handler.add_lib(require("interchange.live"))

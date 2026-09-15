@@ -3,3 +3,5 @@
 .vscode/
 script-output/
 thumbs.db
+__pycache__/
+*.pyc

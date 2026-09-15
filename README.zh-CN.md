@@ -23,7 +23,7 @@ SCV Control 是一个面向 Factorio 2.0 的实验性 Mod，用 RTS 风格的鼠
 - 已在 Factorio 2.0.77 本地验证 Mod 加载和生命周期；交互移动仍需要更完整的实际游玩测试。
 - 当前版本接管方向键，因此暂不支持驾驶载具。
 - 目前只支持空地移动，采矿、维修、攻击和进入载具等情境指令尚未实现。
-- 局部导航快照目前每次规划都会同步重建，尚未实现缓存与世界变化的局部失效。
+- 生产规划的局部导航快照目前每次都会同步重建。增量世界模块已独立实现，生产缓存接入与路径走廊失效处理仍待完成。
 
 ## 安装
 
@@ -37,9 +37,11 @@ SCV Control 是一个面向 Factorio 2.0 的实验性 Mod，用 RTS 风格的鼠
 pwsh -File .\tools\test.ps1
 ```
 
-默认命令会在隔离临时目录运行 smoke、真实引擎 integration 和寻路 benchmark 套件，验证加载、路径优化、角色实际到达、队列实际执行完成、光标到指令的转换、不可达目标和多种规划器的对比行为。各套件会等待任务进入终态；固定 tick 只作为失败超时。详见 [测试](docs/testing.md)、[寻路基准](docs/pathfinding-benchmark.md) 与 [轨迹规划](docs/trajectory.md)。
+默认命令会在隔离临时目录运行 smoke、真实引擎 integration、寻路 benchmark 和导航 episode 套件，验证加载、路径优化、角色实际到达、队列实际执行完成、光标到指令的转换、不可达目标和多种规划器的对比行为。各套件会等待任务进入终态；固定 tick 只作为失败超时。其中运行中插墙的 episode 目前断言的是已记录的失败基线，不代表动态绕障已成功。详见 [测试](docs/testing.md)、[寻路基准](docs/pathfinding-benchmark.md)、[导航 episode](devmods/scv-control-testkit/episodes/README.md) 与 [轨迹规划](docs/trajectory.md)。
 
-下一阶段的组合式 planner profile、无头导航 episode、自动闸门、动态世界失效以及传送带时间成本，统一记录在 [SC2-like 导航架构计划](docs/navigation-architecture-plan.md)。
+已完成的基础模块，以及后续自动闸门、动态世界失效和传送带寻路，统一记录在 [SC2-like 导航架构计划](docs/navigation-architecture-plan.md)。[游戏工业寻路调研](docs/navigation-industry-research.md)记录设计依据；[外部 solver 边界草案](docs/navigation-solver-boundary.md)定义后续的数据捕获与回放、算法适配、验证及无头/GUI 执行闭环。
+
+当前 Lua profile、registry、能力校验和存储边界见[导航扩展契约](docs/navigation-extension-contract.md)。外部 solver 草案尚未实现。
 
 创建或刷新交互测试存档：
 

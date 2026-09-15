@@ -23,7 +23,7 @@ This is an early prototype. Save before testing it in an important factory.
 - The mod load and lifecycle are tested locally on Factorio 2.0.77; interactive movement still needs broader gameplay testing.
 - Vehicle driving is not supported in this prototype because movement controls remain consumed while the mod is enabled.
 - Commands currently target empty ground only; context actions are planned for later versions.
-- Local navigation snapshots are rebuilt synchronously per plan; caching and world-change invalidation are not implemented yet.
+- Production local navigation snapshots are rebuilt synchronously per plan. The incremental world module is implemented separately; production cache integration and corridor invalidation remain planned.
 
 ## Installation
 
@@ -37,9 +37,9 @@ Run the fully headless agent test harness from PowerShell 7:
 pwsh -File .\tools\test.ps1
 ```
 
-The default command runs smoke, engine-backed integration, and pathfinding benchmark suites in an isolated temporary directory. It validates loading, path optimization, completed character movement, completed command queues, cursor-to-command translation, unreachable targets, and comparative planner behavior. Suites exit on terminal assertions; fixed ticks are used only as failure timeouts. See [testing](docs/testing.md), [pathfinding benchmark](docs/pathfinding-benchmark.md), and [trajectory planning](docs/trajectory.md).
+The default command runs smoke, engine-backed integration, pathfinding benchmark, and navigation episode suites in isolated temporary directories. It validates loading, path optimization, completed character movement, completed command queues, cursor-to-command translation, unreachable targets, and comparative planner behavior. Suites exit on terminal assertions; fixed ticks are used only as failure timeouts. The inserted-wall episode currently asserts the documented failure baseline, not successful dynamic recovery. See [testing](docs/testing.md), [pathfinding benchmark](docs/pathfinding-benchmark.md), [episodes](devmods/scv-control-testkit/episodes/README.md), and [trajectory planning](docs/trajectory.md).
 
-The next architecture stages, including composable planner profiles, headless navigation episodes, automatic gates, dynamic-world invalidation, and belt-aware travel-time costs, are defined in the [SC2-like navigation architecture plan](docs/navigation-architecture-plan.md).
+Completed foundations and upcoming automatic gates, dynamic-world invalidation, and belt-aware search are tracked in the [SC2-like navigation architecture plan](docs/navigation-architecture-plan.md). The [game navigation research](docs/navigation-industry-research.md) explains the design decisions, and the [external solver boundary draft](docs/navigation-solver-boundary.md) defines planned capture/replay, adapters, validation, and headless/GUI execution.
 
 Navigation profile schemas, registry ownership, capability validation, and storage boundaries are documented in the [navigation extension contract](docs/navigation-extension-contract.md).
 

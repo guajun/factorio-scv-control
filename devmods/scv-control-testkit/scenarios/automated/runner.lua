@@ -1,6 +1,9 @@
 local Follower = require("__factorio-scv-control__/scripts/follower")
 local Input = require("__factorio-scv-control__/scripts/input")
 local NavigationContractTests = require("navigation_contract_tests")
+local SolverBoundaryTests = require("solver_boundary_tests")
+local NavigationDataTests = require("navigation_data_tests")
+local LiveContractTests = require("live_contract_tests")
 local PathMath = require("__factorio-scv-control__/scripts/path_math")
 local PathSmoothing = require("__factorio-scv-control__/scripts/path_smoothing")
 local PlanningRun = require("__factorio-scv-control__/scripts/navigation/planning_run")
@@ -133,6 +136,9 @@ end
 
 local function run_unit_tests(surface)
   NavigationContractTests.run(expect)
+  SolverBoundaryTests.run(expect)
+  NavigationDataTests.run(expect)
+  LiveContractTests.run(expect)
 
   expect("path_math.distance", PathMath.distance({x = 0, y = 0}, {x = 3, y = 4}) == 5)
 
