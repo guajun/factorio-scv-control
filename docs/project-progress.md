@@ -4,6 +4,11 @@ Target: SC2-like command responsiveness and reliable native-character movement
 in a changing Factorio world. This is not a reproduction of SC2's closed-source
 implementation. Issue counts are bookkeeping, not a percentage of functionality.
 
+Review boundary: [PR #18](https://github.com/guajun/factorio-scv-control/pull/18)
+contains the external framework; this wave is
+[PR #19](https://github.com/guajun/factorio-scv-control/pull/19), stacked on #18's
+branch. Neither is merged as of this checkpoint. Review/merge the foundation first.
+
 ## Delivery state
 
 | Layer | Proven state | Still missing |
@@ -62,3 +67,5 @@ Integrated test artifacts: local temp
 `scv-bundle-replay-yy0qxgtz`, pointing to
 `factorio-scv-agent-test-461d06a5f33242a098c5094b63eee605`.
 No graphical client or GUI peer was launched by these tests.
+The integrated repeated domain reports are retained in local temp
+`scv-calibration-jzzv31f5/calibration-summary.json`.
