@@ -1,4 +1,4 @@
-local Probe = require("calibration.gate_actions.probe")
+local Adapters = require("savebench.adapters")
 local Fixtures = require("calibration.gate_actions.fixtures")
 local PathSmoothing = require("__factorio-scv-control__/scripts/path_smoothing")
 local Contract = {}
@@ -18,9 +18,12 @@ function Contract.run(source)
   PathSmoothing.path_is_clear = function() calls = calls + 1; return true end
   Fixtures.opening = {factorio_version = calibration.factorio_version,
     prototype = calibration.prototype, opening_ticks = calibration.opening_ticks + 3}
-  local ok, fresh = pcall(Probe.arm, saved, game.tick)
+  local prepared = {descriptor = {domain = "gate-actions", start = source.start, goal = source.goal},
+    probe = saved, actor = source.actor, surface = source.surface}
+  local ok, detail = pcall(Adapters.begin, prepared, game.tick)
   PathSmoothing.path_is_clear, Fixtures.opening = validator, calibration
-  if not ok then error(fresh) end
+  if not ok then error(detail) end
+  local fresh = prepared.probe
   local current_verdict
   for _, assertion in ipairs(fresh.assertions) do
     if assertion.name == "production-validator-remains-conservative-on-closed-gate" then
