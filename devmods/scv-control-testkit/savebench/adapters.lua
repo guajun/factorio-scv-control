@@ -3,6 +3,10 @@ local BeltProbe = require("calibration.belt_controller.probe")
 local World = require("episodes.world")
 local Runner = require("episodes.runner")
 local Services = require("episodes.corridor_services")
+local GateAction = require("__factorio-scv-control__/scripts/navigation/gates/action")
+local GateFixtures = require("calibration.gate_actions.fixtures")
+local Motion = require("__factorio-scv-control__/scripts/navigation/motion/measured_uniform")
+local MotionSpecs = require("calibration.belt_controller.model_tests")
 
 local Adapters = {}
 
@@ -23,13 +27,26 @@ function Adapters.prepare(case, sequence)
 end
 
 function Adapters.begin(prepared, tick)
+  prepared.derived_compile_calls = (prepared.derived_compile_calls or 0) + 1
   if prepared.descriptor.domain == "dynamic" then
     -- No World.setup here: this is the exact saved surface and actor.
     prepared.run = Runner.start(prepared.descriptor.fixture, prepared.world, Services, tick)
   else
-    -- Reset the command's clock only. In particular do not recreate an actor,
-    -- teleport it, rebuild belts/walls or rerun gate semantic setup assertions.
-    prepared.probe.started_tick = tick
+    local probe = prepared.probe
+    -- Recompile algorithm state with the current implementation against the
+    -- saved real entities. A source map must not pin an obsolete Action.new or
+    -- motion-field implementation inside a previously serialized probe.
+    if prepared.descriptor.domain == "gate-actions" then
+      probe.action, probe.rejection = GateAction.new(probe.gate, probe.actor,
+        probe.start, probe.goal, GateFixtures.opening)
+    else
+      local spec = MotionSpecs.spec(probe.fixture.belt, probe.fixture.belt_direction)
+      spec.running_speed = probe.actor.character_running_speed
+      probe.field = assert(Motion.field(spec))
+    end
+    -- Clock reset is command state only. No entity creation, teleport, tile
+    -- mutation or geometry factory is permitted in this replay path.
+    probe.started_tick = tick
   end
 end
 

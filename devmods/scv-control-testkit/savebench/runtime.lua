@@ -33,6 +33,7 @@ local function status()
     surface = prepared and prepared.surface.valid and prepared.surface.name or false,
     game_tick = game.tick, paused = game.tick_paused, ticks_to_run = game.ticks_to_run,
     loaded_from_save = loaded_from_save, runtime_build_calls = runtime_build_calls,
+    derived_compile_calls = prepared and prepared.derived_compile_calls or 0,
     reason = state and state.reason or false,
     report_path = result and RESULT_PATH or false,
     performance_path = state and state.run_started_tick and PERFORMANCE_PATH or false,
@@ -92,6 +93,7 @@ local function finish(state, result)
     factorio_version = script.active_mods.base,
     source_facts_hash = state.source_facts_hash, source_verified = state.source_verified == true,
     loaded_from_save = loaded_from_save, runtime_build_calls = runtime_build_calls,
+    derived_compile_calls = state.prepared.derived_compile_calls or 0,
     run_started_tick = state.run_started_tick, completed_tick = game.tick,
     duration_ticks = state.run_started_tick and game.tick - state.run_started_tick or 0,
     result = result, performance_path = PERFORMANCE_PATH}
@@ -170,6 +172,7 @@ local function run(state)
   if not facts then return fail(state, "source-recapture-failed:" .. detail.code .. ":" .. detail.message) end
   if facts.facts_hash ~= state.source_facts_hash then return fail(state, "source-facts-changed") end
   state.source_verified, state.phase, state.run_started_tick = true, "running", game.tick
+  state.last_update_tick = game.tick
   game.speed = 1
   hook_profiles = {}
   helpers.write_file(PERFORMANCE_PATH, "", false, 0)
@@ -272,6 +275,11 @@ local function tick(event)
   if not enabled() then return end
   local state = saved_state()
   if not state or state.phase ~= "running" then return end
+  -- A paused RCON command can arm movement before on_tick for that same tick.
+  -- It has not had a native entity update yet; sampling twice would report a
+  -- fictitious zero-speed collision and query a gate mid-request transition.
+  if state.last_update_tick and event.tick <= state.last_update_tick then return end
+  state.last_update_tick = event.tick
   local ok, result = pcall(function()
     return profile("on_tick", function() return Adapters.update(state.prepared, event.tick) end)
   end)
