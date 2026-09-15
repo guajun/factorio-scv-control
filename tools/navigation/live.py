@@ -430,10 +430,15 @@ def wait_saved_map(path: Path, process: subprocess.Popen, timeout: float) -> dic
         try:
             with zipfile.ZipFile(path) as archive:
                 members = archive.namelist()
-                # Factorio 2.0 splits level.dat into level.dat0/1/metadata.
-                has_level = any(name.endswith("/level.dat") for name in members) or all(
-                    any(name.endswith("/" + suffix) for name in members)
-                    for suffix in ("level.dat0", "level.dat1", "level.datmetadata"))
+                # Factorio 2.0 writes a variable number of contiguous shards.
+                # Small maps can contain only level.dat0; assuming dat1 exists
+                # rejects a complete ZIP. This only checks publication shape:
+                # the subsequent native restart validates the actual save.
+                shards = sorted(int(match.group(1)) for name in members
+                                if (match := re.search(r"/level\.dat(\d+)$", name)))
+                has_level = any(name.endswith("/level.dat") for name in members) or (
+                    bool(shards) and shards == list(range(len(shards)))
+                    and any(name.endswith("/level.datmetadata") for name in members))
                 if has_level and any(name.endswith("/script.dat") for name in members) and archive.testzip() is None:
                     return {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
                             "bytes": path.stat().st_size}

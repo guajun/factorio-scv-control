@@ -70,10 +70,22 @@ Verified in installed Factorio 2.0.77 and by a native headless run:
 - `game.tick` and entity positions freeze; `game.ticks_played` keeps increasing.
 - `ticks_to_run=N` advances exactly N map/entity ticks and pauses again.
 - A saved/reloaded paused map preserves the source tick and actor.
-- This version stores `level.dat0`, `level.dat1`, `level.datmetadata` and
-  `script.dat` in a ZIP. An initial host check for plain `level.dat` incorrectly
-  waited for a valid save; the host parser and regression test now accept the
-  split layout. This was a host validation failure, not a Factorio save failure.
+- This version stores a variable number of contiguous `level.dat0`,
+  `level.dat1`, etc. shards, plus `level.datmetadata` and `script.dat`. An
+  initial host check for plain `level.dat` incorrectly waited for a valid save.
+  Its first correction assumed exactly two shards, which also failed: a later
+  valid 500,538-byte ZIP contained only `level.dat0`. The live lab's unseeded
+  initial Nauvis changed save size even though the authored wall fixture stayed
+  the same. Publication checks now accept contiguous shards starting at zero,
+  require metadata and script data, and verify ZIP CRC; native reload remains
+  the validity oracle. Regressions cover one, two, three and missing shards.
+  Neither failure was a save timeout; the watchdog duration is unchanged.
+
+The host restarts with the exact copied mod directory used when saving. Its
+current live configuration may enable installed DLC mods; this experiment
+does not claim an identical environment to the separately fixed base-only
+domain corpus. The artifact's logs, copied `mod-list.json` and saved map preserve
+the actual environment.
 
 Primary API: [tick_paused](https://lua-api.factorio.com/2.0.77/classes/LuaGameScript.html#tick_paused),
 [ticks_to_run](https://lua-api.factorio.com/2.0.77/classes/LuaGameScript.html#ticks_to_run),

@@ -12,16 +12,33 @@ from rcon import RconError
 
 class DebugClockHostTests(unittest.TestCase):
     def test_factorio_split_level_save_is_recognized_and_hashed(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "source.zip"
-            with zipfile.ZipFile(path, "w") as archive:
-                for member in ("level.dat0", "level.dat1", "level.datmetadata", "script.dat"):
-                    archive.writestr("source/" + member, b"fixture")
-            process = Mock()
-            process.poll.return_value = None
-            result = wait_saved_map(path, process, 0.1)
-            self.assertEqual(result["sha256"], hashlib.sha256(path.read_bytes()).hexdigest())
-            self.assertEqual(result["bytes"], path.stat().st_size)
+        for count in (1, 2, 3):
+            with self.subTest(shards=count), tempfile.TemporaryDirectory() as temporary:
+                path = Path(temporary) / "source.zip"
+                with zipfile.ZipFile(path, "w") as archive:
+                    for member in [*("level.dat" + str(index) for index in range(count)),
+                                   "level.datmetadata", "script.dat"]:
+                        archive.writestr("source/" + member, b"fixture")
+                process = Mock()
+                process.poll.return_value = None
+                result = wait_saved_map(path, process, 0.1)
+                self.assertEqual(result["sha256"], hashlib.sha256(path.read_bytes()).hexdigest())
+                self.assertEqual(result["bytes"], path.stat().st_size)
+
+    def test_gapped_shards_missing_first_shard_or_metadata_are_incomplete(self):
+        for members in [("level.dat0", "level.dat2", "level.datmetadata", "script.dat"),
+                        ("level.dat1", "level.datmetadata", "script.dat"),
+                        ("level.dat0", "script.dat")]:
+            with self.subTest(members=members), tempfile.TemporaryDirectory() as temporary:
+                path = Path(temporary) / "source.zip"
+                with zipfile.ZipFile(path, "w") as archive:
+                    for member in members:
+                        archive.writestr("source/" + member, b"fixture")
+                process = Mock()
+                process.poll.return_value = None
+                with patch("live.time.monotonic", side_effect=[0, 0, 2]), patch("live.time.sleep"):
+                    with self.assertRaisesRegex(RconError, "save watchdog"):
+                        wait_saved_map(path, process, 1)
 
     def test_partial_save_cannot_be_used_as_fact_source(self):
         with tempfile.TemporaryDirectory() as temporary:
