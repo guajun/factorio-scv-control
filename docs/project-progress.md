@@ -16,7 +16,8 @@ remain unmerged as of this checkpoint; review the foundation first.
 
 ## Static saved-map comparison checkpoint
 
-`codex/saved-solver-comparison`, based on `1cdbb94`, adds eleven persistent
+[PR #22](https://github.com/guajun/factorio-scv-control/pull/22),
+`codex/saved-solver-comparison` based on `1cdbb94`, adds eleven persistent
 source ZIPs and a 44-row matrix: production-v1, captured-grid A*, Dijkstra and
 source polygons. The first complete run passes forty native arrivals and four
 expected no-paths. Every algorithm reloads the same case ZIP with zero geometry
