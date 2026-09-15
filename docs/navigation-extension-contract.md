@@ -4,6 +4,11 @@ Navigation composition is static and data-driven. Profiles and runtime reference
 plain serializable tables; implementations are resolved from fixed registries after a
 save is loaded. The initial schema version is `1`.
 
+This document describes implemented Lua contracts. Proposed NavigationData, query-time
+objectives, and external process interchange are specified separately in the
+[solver boundary draft](navigation-solver-boundary.md). They require explicit adapters
+and versioned changes; plain-table serializability alone does not implement that boundary.
+
 ## Storage boundary
 
 Production storage contains only the selected profile ID and serializable run values:

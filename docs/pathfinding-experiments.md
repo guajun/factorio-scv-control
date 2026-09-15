@@ -4,6 +4,20 @@ New entries go at the top. Keep failed hypotheses and operational mistakes: the 
 
 Each entry should state the question, exact fixture/version, measured result, falsified assumption, and decision. Generated JSON remains the source of exact per-path data; this document records why the result changed the design.
 
+## 2026-09-15 - Industry research exposes objective and backend boundaries
+
+**Question:** Can external game-navigation libraries fit the composable pipeline, and is a serialized polyline plus final cost scoring a sufficient contract?
+
+**Evidence scope:** Source/documentation review against main `852349a`, using the primary references in [game navigation research](navigation-industry-research.md). This entry records a design investigation, not a new runtime experiment. No solver timings, transport probe, or improved arrival results were measured.
+
+**Finding:** The merged pipeline shares request order, validation, and follower behavior, but providers receive no explicit committed NavigationData/query-objective contract. Cost runs after candidate generation; `PlanningRun` currently writes the scalar score into `predicted.distance`. The local search domain is justified for distance improvement, and geometric smoothing has no directed-time preservation contract.
+
+**Rejected assumption:** Replacing the final scorer with travel time, or wrapping an external `findPath`, is sufficient to discover a longer favorable belt route. The distance ellipse can exclude that route; an incompatible search heuristic can distort the objective; smoothing can remove the useful belt section. Exporting only the already-inflated grid would additionally preserve the known narrow-channel loss in every external solver.
+
+**Decision:** Separate observed world facts, committed derived navigation data, and query policy. Pass filter/directed objective into search, retain objective units and transition metadata, and validate the final executable geometry in Factorio. Keep the current production profile as a comparison baseline. Use offline capture/replay before adding live transport; design explicit partial/budget/stale/cancel outcomes rather than treating every missing answer as no-path.
+
+**Next evidence:** [Planned comparisons](navigation-industry-research.md#experiments-and-decision-gates) cover fixture-v4 tight clearance, a longer-faster directed route against a same-graph Dijkstra reference, objective-preserving smoothing, committed world updates, the known inserted-wall failure, and external lifecycle faults. Exact new fixture definitions and acceptance bounds must land before collecting their measurements. [Boundary packages A-E](navigation-solver-boundary.md#evaluation-and-implementation-packages) define dependencies and ownership; real gate and belt calibration remain independently actionable.
+
 ## 2026-09-01 - Late wall replanning cannot recover a safe production route
 
 **Question:** Does the current stuck-triggered replan recover after a wall is inserted ahead of a moving character when the episode uses the shared `production-v1` `PlanningRun`?
