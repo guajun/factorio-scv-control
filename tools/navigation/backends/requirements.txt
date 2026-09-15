@@ -1,0 +1,5 @@
+# Isolated Python 3.12 environment. extremitypathfinder 2.7.2 requires NumPy <2.
+extremitypathfinder==2.7.2
+numpy==1.26.4
+networkx==3.5
+shapely==2.1.2
