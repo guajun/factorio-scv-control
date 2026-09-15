@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [ValidateSet("smoke", "integration", "benchmark", "episodes", "calibration", "execution", "interchange", "live", "all")]
+  [ValidateSet("smoke", "integration", "benchmark", "episodes", "calibration", "execution", "savebench", "interchange", "live", "stepped", "all")]
   [string]$Suite = "all",
   [string]$FactorioExe = $env:FACTORIO_EXE,
   [string]$PythonExe = "python",
@@ -438,6 +438,11 @@ enable-new-mods=true
   if ($Suite -in @("interchange", "all")) {
     Invoke-IntegrationSuite $factorio $configPath $modsRoot $writeData $resolvedTestRoot "interchange"
   }
+  if ($Suite -in @("savebench", "all")) {
+    Write-Host "[savebench] Loading authoritative native save corpus in fresh headless processes" -ForegroundColor Cyan
+    & $PythonExe (Join-Path $projectRoot "tools/navigation/savebench.py") --test --factorio-exe $factorio --timeout $TimeoutSeconds
+    if ($LASTEXITCODE -ne 0) { throw "Saved-map native replay tests failed." }
+  }
   if ($Suite -eq "all") {
     Write-Host "[solver] Running host protocol and graph-search conformance tests" -ForegroundColor Cyan
     & $PythonExe -m unittest discover -s (Join-Path $projectRoot "tools/navigation") -p "test_*.py" -v
@@ -447,6 +452,11 @@ enable-new-mods=true
     Write-Host "[live] Running isolated external solver/native follower loop" -ForegroundColor Cyan
     & $PythonExe (Join-Path $projectRoot "tools/navigation/live.py") --test --factorio-exe $factorio --timeout $TimeoutSeconds
     if ($LASTEXITCODE -ne 0) { throw "Live external solver headless tests failed." }
+  }
+  if ($Suite -in @("stepped", "all")) {
+    Write-Host "[stepped] Loading a real save and stepping native execution around external solver waits" -ForegroundColor Cyan
+    & $PythonExe (Join-Path $projectRoot "tools/navigation/live.py") --test --solver-clock stepped --factorio-exe $factorio --timeout $TimeoutSeconds
+    if ($LASTEXITCODE -ne 0) { throw "Saved-map stepped external solver tests failed." }
   }
   $failed = $false
   Write-Host "PASS: suite=$Suite Factorio=$actualVersion" -ForegroundColor Green

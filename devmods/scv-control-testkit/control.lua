@@ -3,3 +3,4 @@ handler.add_lib(require("__factorio-scv-control__/scenarios/scv-control-test/tes
 handler.add_lib(require("pathfinding.runtime"))
 handler.add_lib(require("interchange.runtime"))
 handler.add_lib(require("interchange.live"))
+handler.add_lib(require("savebench.runtime"))
