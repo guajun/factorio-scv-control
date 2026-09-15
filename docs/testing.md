@@ -30,9 +30,13 @@ Available suites:
 | `benchmark` | Runs the shared pathfinding test set against engine, alternate, A*, weighted A*, and Theta* variants. |
 | `episodes` | Shared PlanningRun and follower in condition-driven episodes, including the known inserted-wall failure baseline. |
 | `calibration` | Twice-repeated, fixed-seed real gate/belt native-motion probes; full metrics/timelines must agree. Not planner capability validation. |
+| `execution` | Repeated gate actions, dynamic corridor response and belt controller experiments, including historical controls. |
+| `savebench` | Loads all 45 persistent gate/dynamic/belt source ZIPs and verifies native outcomes without rebuilding geometry. |
+| `compare` | Loads eleven static source ZIPs with four configurations each; same-graph references, shared native execution and separate timing scopes. Requires the pinned topology worker. |
 | `interchange` | Bounded fixture capture, query/hash conformance, import rejection, and actual follower replay. |
 | `live` | Starts the isolated loopback headless/RCON lab and asserts external result delivery, native arrival and lifecycle rejection. |
-| `all` | Runs smoke, integration, benchmark, episodes, calibration, interchange, Python conformance and the live headless loop. This is the required pre-commit command. |
+| `stepped` | Loads a real source save and verifies exact native clock stepping around external solver waits. |
+| `all` | Runs every suite above plus Python conformance. This is the required pre-commit command. |
 
 Use `-Verbose` for Factorio stdout. Successful regular suites clean their temporary directory. Failures retain it and print its path; `-KeepArtifacts` retains successful artifacts as well. The separate live host retains its own report/work artifacts and prints that additional root.
 
@@ -49,8 +53,10 @@ For an already generated `solver-bundle.json`, use
 host contract, imports only into an isolated project copy, and uses the same
 headless acceptance/follower replay. The optional pinned source-polygon backend
 has separate dependency-backed tests and comparison commands in
-[its guide](../tools/navigation/backends/README.md); default `all` never installs
-third-party packages and does not substitute for that backend's explicit eval.
+[its guide](../tools/navigation/backends/README.md). Default `all` never installs
+third-party packages; provision the pinned worker before running the new
+[44-row saved solver comparison](saved-solver-comparison.md). `-TopologyPython`
+selects that worker separately from the ordinary `-PythonExe` host.
 
 ## Reports
 

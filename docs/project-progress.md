@@ -14,6 +14,65 @@ on `codex/domain-execution-wave`, following #19. The saved-map follow-up is
 `codex/save-backed-testbench`, based on execution commit `0f07a87`. All four PRs
 remain unmerged as of this checkpoint; review the foundation first.
 
+## Static saved-map comparison checkpoint
+
+[PR #22](https://github.com/guajun/factorio-scv-control/pull/22),
+`codex/saved-solver-comparison` based on `1cdbb94`, adds eleven persistent
+source ZIPs and a 44-row matrix: production-v1, captured-grid A*, Dijkstra and
+source polygons. The first complete run passes forty native arrivals and four
+expected no-paths. Every algorithm reloads the same case ZIP with zero geometry
+builders and shared admission/Follower execution. Against production, source
+polygons shorten seven of ten reachable paths and arrive sooner in six;
+the other four arrival times tie. This measures a static representation
+candidate, not completed gate/belt/dynamic solver integration.
+
+The complete static source corpus is
+`F:\factorio-scv-testbench\static-corpora\v1-20260915-230807-161ad4`.
+Its first report is
+`F:\factorio-scv-testbench\comparisons\v1-20260915-230807-161ad4\comparison.json`.
+The [comparison guide](saved-solver-comparison.md) explains the pinned worker,
+headless commands, manual game inspection and timing scopes. `-Suite compare`
+is now included in `all`, alongside the existing 45 domain source maps.
+The production profile is preserved; current GUI source-map commands expose
+production preview/execution, while the host submits external algorithms.
+
+The experiment also found that the old turn counter missed waypoint
+transitions. New native command-direction metrics and explicit legacy scope
+are tested through the shared Follower, without changing movement behavior.
+The final `pwsh -NoProfile -File .\tools\test.ps1 -Suite all -KeepArtifacts`
+passes on Factorio 2.0.77: 131 integration assertions, the original 11 x 10
+benchmark and three episodes, repeated physical/domain execution suites,
+11 interchange checks, 45/45 domain saves, 44/44 static comparisons, seven
+realtime checks and sixteen saved-map stepping checks. Host discovery runs
+95 tests (94 pass, one optional dependency test skips in ordinary Python);
+the pinned Python 3.12 environment separately passes all ten worker tests,
+including that dependency case, plus all seven backend tests. Every polygon
+row also executes the pinned backend in the default comparison.
+
+Final report:
+`F:\factorio-scv-testbench\comparisons\v1-20260915-232708-989d05\comparison.json`.
+All 44 accepted paths and native travel tick counts exactly match the first
+complete run after adding the direction observer. Source ZIPs are unchanged.
+Slalom command changes are production 17, grid A* 4, Dijkstra 6 and polygons
+15; the old grid within-segment counters were both zero.
+
+Functional success still leaves a realtime performance gate. In the final
+reachable polygon rows, native-geometry compilation takes 2.20–6.82 ms,
+prepared-map construction 0.68–14.61 ms, and first library query 0.54–2.24 ms.
+The comparison's full capture takes 0.31–6.16 s for polygon rows, and their
+upload/admission takes 0.32–2.53 s. Production's `long-wall-enter` cold planning
+callback peaks at 605.49 ms (slalom: 595.40 ms). These callback measurements
+include local comparison and validation; they are not engine-only search
+timings. Pausing the world makes correctness testable, not realtime-qualified.
+
+Final retained local-temp artifacts:
+
+- `factorio-scv-agent-test-6a752ed12a894155bf537544b61578fa`: main suite.
+- `scv-savebench-ur6yf9sc`: 45 original source-map replays.
+- `scv-static-compare-88ctapxc`: 44 final comparisons with exact capture/solver/native evidence.
+- `factorio-scv-live-bqlarnl7`: realtime external loop.
+- `factorio-scv-live-2skoq6uz`: saved-map native stepping.
+
 ## Delivery state
 
 | Layer | Proven state | Still missing |
@@ -27,7 +86,7 @@ remain unmerged as of this checkpoint; review the foundation first.
 | Belts | 56 native calibration cases; measured discrete velocity hull, directed cost prototype and 30 native controller arrivals plus four model cases. Saved replay binds its goal/width independently of current defaults. Express crossing drift 5.0625 → 0.2461 tiles, time 142 → 70 ticks. | Uniform unobstructed fields only. No time-aware route search, swept-wall validation, field boundaries, equipment, dynamic controller refresh or stationary holding; #2/#10 stay open. |
 | Topology quality | #17 first source-polygon backend: all 11 cases retained, ten complete routes pass native replay; tight distance 23.2191 → 20.0661 versus captured grid. | Only static wall/tile geometry. Update/memory/larger-domain and live/GUI integration remain; no default promotion. |
 | Dynamic movement | New shared PlanningRun/Follower wrapper stops on-route construction in its event and requests replan one tick later; native off-route/behind/removal/forward-belt controls and pure policy cases. Historical failure stays as a control. | Test adapter only. Motion/transient notifications lack a control/avoidance consumer; production event coverage, external committed generations and aggregate frame-time budgets remain in #11. |
-| Native source maps | 45 directly openable gate/dynamic/belt saves, source ZIP/facts/mod hashes, fresh-process replay with zero geometry builders; each case records actual native outcomes and script-hook timing. | Current corpus covers this domain execution wave. Derived grids/state tables still need their own equivalence tests; larger factory performance remains unproven. |
+| Native source maps | 45 directly openable gate/dynamic/belt saves plus eleven static saves with 44 algorithm rows, source ZIP/facts/mod hashes and fresh-process replay with zero geometry builders. | Static compiled maps have native evidence on this catalog; broader state-table equivalence and factory-scale performance remain unproven. |
 | External debug clock | Saved long-wall map, real capture/solver/admission while frozen, native exact stepping to arrival; 16 checks plus retained seven-check realtime loop. | Stepping proves correctness, not realtime speed. Cold capture and solver remain expensive. |
 
 GitHub milestone `SC2-like navigation foundation` currently has four closed

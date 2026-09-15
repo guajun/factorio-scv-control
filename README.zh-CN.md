@@ -1,5 +1,7 @@
 # SCV Control
 
+新增[真实存档算法对比](docs/saved-solver-comparison.md)：11 张静态地图分别加载生产方案、栅格 A*、Dijkstra 和源多边形，共 44 次原生执行。运行 `tools/test.ps1 -Suite compare`；默认 `all` 也包含它，需要按文档准备固定版本的 Python 3.12 拓扑求解环境。报告分别记录路径长度、实际到达、构图、求解和传输验收耗时。
+
 [English](README.md)
 
 SCV Control 是一个面向 Factorio 2.0 的实验性 Mod，用 RTS 风格的鼠标指令替代角色的直接移动。

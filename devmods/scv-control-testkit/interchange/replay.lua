@@ -119,6 +119,8 @@ function Replay.activate(session, run, result)
     return session
   end
   session.status = "moving"
+  session.command_direction_changes, session.issued_direction_samples = 0, 0
+  session.last_command_direction = nil
   session.follow_state = {path = result.route.points, waypoint_index = 1,
     segment_start = copy_position(session.actor.position), recovery_attempts = 0}
   session.movement_started_tick = game.tick
@@ -135,6 +137,18 @@ function Replay.update(session, tick)
   diagnostics = diagnostics or {}
   session.max_cross_track_error = math.max(session.max_cross_track_error, math.abs(diagnostics.cross_track_error or 0))
   if diagnostics.switched then session.direction_switches = session.direction_switches + 1 end
+  -- Trajectory state resets at each waypoint, so its `switched` flag counts
+  -- only changes within that segment. Observe the direction actually issued by
+  -- Follower across segment boundaries too. Reading walking_state immediately
+  -- after assignment can expose the previous native state in this event.
+  if status == "moving" and diagnostics.selected_direction ~= nil then
+    local direction = diagnostics.selected_direction
+    if session.last_command_direction ~= nil and direction ~= session.last_command_direction then
+      session.command_direction_changes = (session.command_direction_changes or 0) + 1
+    end
+    session.last_command_direction = direction
+    session.issued_direction_samples = (session.issued_direction_samples or 0) + 1
+  end
   if status == "arrived" then
     session.arrival_error = PathMath.distance(actor.position, session.query.goal)
     session.status = session.arrival_error <= session.execution_arrival_tolerance
@@ -159,6 +173,10 @@ function Replay.report(session)
     raw_result = session.result, final_result = session.planning_result,
     actual_travel_ticks = session.actual_travel_ticks, actual_distance = session.actual_distance,
     arrival_error = session.arrival_error, direction_switches = session.direction_switches,
+    direction_switches_scope = "within-trajectory-segment-hysteresis-switches",
+    command_direction_changes = session.command_direction_changes or 0,
+    command_direction_changes_scope = "consecutive-issued-walking-directions-including-waypoint-transitions",
+    issued_direction_samples = session.issued_direction_samples or 0,
     execution_arrival_tolerance = session.execution_arrival_tolerance,
     max_cross_track_error = session.max_cross_track_error
   }

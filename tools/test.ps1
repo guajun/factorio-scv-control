@@ -1,9 +1,10 @@
 [CmdletBinding()]
 param(
-  [ValidateSet("smoke", "integration", "benchmark", "episodes", "calibration", "execution", "savebench", "interchange", "live", "stepped", "all")]
+  [ValidateSet("smoke", "integration", "benchmark", "episodes", "calibration", "execution", "savebench", "compare", "interchange", "live", "stepped", "all")]
   [string]$Suite = "all",
   [string]$FactorioExe = $env:FACTORIO_EXE,
   [string]$PythonExe = "python",
+  [string]$TopologyPython,
   [int]$TimeoutSeconds = 90,
   [switch]$KeepArtifacts
 )
@@ -442,6 +443,13 @@ enable-new-mods=true
     Write-Host "[savebench] Loading authoritative native save corpus in fresh headless processes" -ForegroundColor Cyan
     & $PythonExe (Join-Path $projectRoot "tools/navigation/savebench.py") --test --factorio-exe $factorio --timeout $TimeoutSeconds
     if ($LASTEXITCODE -ne 0) { throw "Saved-map native replay tests failed." }
+  }
+  if ($Suite -in @("compare", "all")) {
+    Write-Host "[compare] Comparing 11 source saves across four planner configurations headlessly" -ForegroundColor Cyan
+    $comparisonArgs = @((Join-Path $projectRoot "tools/navigation/compare_saved.py"), "--factorio-exe", $factorio, "--timeout", $TimeoutSeconds)
+    if ($TopologyPython) { $comparisonArgs += @("--topology-python", $TopologyPython) }
+    & $PythonExe @comparisonArgs
+    if ($LASTEXITCODE -ne 0) { throw "Saved-map solver comparison failed." }
   }
   if ($Suite -eq "all") {
     Write-Host "[solver] Running host protocol and graph-search conformance tests" -ForegroundColor Cyan
