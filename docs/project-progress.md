@@ -8,8 +8,9 @@ Review boundary: [PR #18](https://github.com/guajun/factorio-scv-control/pull/18
 contains the external framework;
 [PR #19](https://github.com/guajun/factorio-scv-control/pull/19) contains native
 calibration and source-polygon replay, stacked on #18's branch. The new
-`codex/domain-execution-wave` follows #19. Earlier PRs remain unmerged as of
-this checkpoint; review the foundation first.
+execution wave is [PR #20](https://github.com/guajun/factorio-scv-control/pull/20)
+on `codex/domain-execution-wave`, following #19. All three PRs remain unmerged
+as of this checkpoint; review the foundation first.
 
 ## Delivery state
 
