@@ -3,10 +3,6 @@ local BeltProbe = require("calibration.belt_controller.probe")
 local World = require("episodes.world")
 local Runner = require("episodes.runner")
 local Services = require("episodes.corridor_services")
-local GateAction = require("__factorio-scv-control__/scripts/navigation/gates/action")
-local GateFixtures = require("calibration.gate_actions.fixtures")
-local Motion = require("__factorio-scv-control__/scripts/navigation/motion/measured_uniform")
-local MotionSpecs = require("calibration.belt_controller.model_tests")
 
 local Adapters = {}
 
@@ -33,26 +29,21 @@ function Adapters.begin(prepared, tick)
     prepared.run = Runner.start(prepared.descriptor.fixture, prepared.world, Services, tick)
   else
     local probe = prepared.probe
-    -- Recompile algorithm state with the current implementation against the
-    -- saved real entities. A source map must not pin an obsolete Action.new or
-    -- motion-field implementation inside a previously serialized probe.
+    -- Recreate evidence as well as algorithm state. Persisted passing booleans
+    -- and model/calibration metadata are not evidence about the current code.
+    -- No entity creation, teleport, tile mutation or geometry factory is
+    -- permitted in this replay path; arm only reads the saved native objects.
     if prepared.descriptor.domain == "gate-actions" then
-      probe.action, probe.rejection = GateAction.new(probe.gate, probe.actor,
-        probe.start, probe.goal, GateFixtures.opening)
+      prepared.probe = GateProbe.arm(probe, tick,
+        {start = prepared.descriptor.start, goal = prepared.descriptor.goal})
     else
-      local spec = MotionSpecs.spec(probe.fixture.belt, probe.fixture.belt_direction)
-      spec.running_speed = probe.actor.character_running_speed
-      probe.field = assert(Motion.field(spec))
       local case = prepared.descriptor
       local constraints = case.scope.execution_constraints
-      probe.saved_command = {start = case.start, goal = case.goal,
+      prepared.probe = BeltProbe.arm(probe, tick, {start = case.start, goal = case.goal,
         -- The first experimental corpus already saved this exact constraint in
         -- its probe metrics. New sources bind it in the native facts metadata.
-        corridor_half_width = constraints and constraints.corridor_half_width or probe.metrics.corridor_half_width}
+        corridor_half_width = constraints and constraints.corridor_half_width or probe.metrics.corridor_half_width})
     end
-    -- Clock reset is command state only. No entity creation, teleport, tile
-    -- mutation or geometry factory is permitted in this replay path.
-    probe.started_tick = tick
   end
 end
 

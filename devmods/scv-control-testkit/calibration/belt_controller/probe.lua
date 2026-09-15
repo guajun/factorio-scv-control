@@ -13,6 +13,22 @@ local function expect(probe, name, passed, details)
   probe.assertions[#probe.assertions + 1] = {name = name, passed = passed == true, details = details}
 end
 
+function Probe.arm(source, tick, saved_command)
+  local fixture, actor, surface = source.fixture, source.actor, source.surface
+  local spec = ModelTests.spec(fixture.belt, fixture.belt_direction)
+  spec.running_speed = actor.character_running_speed
+  local field = assert(Motion.field(spec))
+  return {surface = surface, actor = actor, fixture = fixture, field = field, saved_command = saved_command,
+    started_tick = tick, samples = 0, timeline = {}, assertions = {},
+    metrics = {mode = fixture.mode, relationship = fixture.relationship, pair = fixture.pair,
+      belt = fixture.belt, belt_direction = fixture.belt_direction, command_direction = fixture.direction,
+      actual_belt_count = surface.count_entities_filtered({name = fixture.belt, area = {{-12, -12}, {12, 12}}}),
+      actor_profile = spec.actor_profile, model_id = field.id, calibration_id = field.calibration_id, model_spec = spec,
+      corridor_half_width = saved_command and saved_command.corridor_half_width or Fixtures.corridor_half_width,
+      actual_distance = 0, max_cross_track_error = 0, direction_switches = 0, max_velocity_model_error = 0,
+      native_execution = true, production_profile_modified = false}}
+end
+
 function Probe.start(fixture)
   local surface = game.get_surface(SURFACE)
   if not surface then
@@ -26,24 +42,12 @@ function Probe.start(fixture)
     surface.set_tiles(tiles, true, false, false, false)
   end
   for _, entity in pairs(surface.find_entities({{-20, -20}, {20, 20}})) do entity.destroy() end
-  local count = 0
   for x = -12, 11 do for y = -12, 11 do
     assert(surface.create_entity({name = fixture.belt, position = {x + 0.5, y + 0.5},
       direction = fixture.belt_direction, force = "player"}))
-    count = count + 1
   end end
   local actor = assert(surface.create_entity({name = "character", position = {0.5, 0.5}, force = "player"}))
-  local spec = ModelTests.spec(fixture.belt, fixture.belt_direction)
-  spec.running_speed = actor.character_running_speed
-  local field = assert(Motion.field(spec))
-  return {surface = surface, actor = actor, fixture = fixture, field = field,
-    started_tick = game.tick, samples = 0, timeline = {}, assertions = {},
-    metrics = {mode = fixture.mode, relationship = fixture.relationship, pair = fixture.pair,
-      belt = fixture.belt, belt_direction = fixture.belt_direction, command_direction = fixture.direction,
-      actual_belt_count = count, actor_profile = spec.actor_profile, model_id = Motion.id,
-      corridor_half_width = Fixtures.corridor_half_width, actual_distance = 0,
-      max_cross_track_error = 0, direction_switches = 0, max_velocity_model_error = 0,
-      native_execution = true, production_profile_modified = false}}
+  return Probe.arm({surface = surface, actor = actor, fixture = fixture}, game.tick)
 end
 
 local function finish(probe, status, reason)

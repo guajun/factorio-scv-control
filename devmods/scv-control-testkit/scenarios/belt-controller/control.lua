@@ -1,6 +1,7 @@
 local Fixtures = require("__scv-control-testkit__/calibration/belt_controller/fixtures")
 local Probe = require("__scv-control-testkit__/calibration/belt_controller/probe")
 local ModelTests = require("__scv-control-testkit__/calibration/belt_controller/model_tests")
+local ReplayContract = require("__scv-control-testkit__/calibration/belt_controller/replay_contract")
 remote.add_interface("scv_test_runner", {active = function() return true end})
 
 local function finish(suite)
@@ -43,6 +44,10 @@ script.on_init(function()
   game.speed = 8
   storage.scv_belt_controller = {started_tick = game.tick, index = 1, cases = ModelTests.run()}
   storage.scv_belt_controller.probe = Probe.start(Fixtures.cases[1])
+  for _, assertion in ipairs(ReplayContract.run(storage.scv_belt_controller.probe)) do
+    local assertions = storage.scv_belt_controller.probe.assertions
+    assertions[#assertions + 1] = assertion
+  end
 end)
 script.on_event(defines.events.on_tick, function()
   local suite = storage.scv_belt_controller

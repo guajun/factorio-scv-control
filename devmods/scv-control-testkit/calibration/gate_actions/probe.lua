@@ -19,6 +19,35 @@ local function circuit(wall)
   behavior.circuit_condition = {condition = {first_signal = {type = "virtual", name = "signal-A"}, comparator = ">", constant = 0}}
 end
 
+-- Recreate evidence and algorithm state from native objects, never from stored
+-- assertion booleans, a previous timeline or a previously compiled action.
+-- This performs reads only; creating the physical world belongs to start().
+function Probe.arm(source, tick, command)
+  local fixture, actor, gate, wall, surface = source.fixture, source.actor, source.gate, source.wall, source.surface
+  local start = copy(command and command.start or source.start)
+  local goal = copy(command and command.goal or source.goal)
+  local p = {fixture = fixture, actor = actor, gate = gate, wall = wall, surface = surface,
+    start = start, goal = goal, started_tick = tick, previous_position = copy(actor.position),
+    follower = {path = {copy(goal)}, waypoint_index = 1, segment_start = copy(start)},
+    assertions = {}, timeline = {}, metrics = {running_speed = actor.character_running_speed,
+      stationary_command_ticks = 0, slowed_command_ticks = 0, actual_distance = 0,
+      max_lateral_error = 0, follower_replans = 0, action_replans = 0, opened_tick = -1,
+      first_movement_tick = -1, mutation_tick = -1, invalidation_tick = -1}}
+  assert_case(p, "real-closed-gate", gate.valid and gate.type == "gate" and gate.is_closed())
+  assert_case(p, "production-validator-remains-conservative-on-closed-gate",
+    not PathSmoothing.path_is_clear(surface, actor, start, {goal}, 0))
+  local neighbours = {}
+  for direction, entity in pairs(gate.neighbours or {}) do
+    neighbours[#neighbours + 1] = {direction = direction, type = entity.type,
+      position = copy(entity.position), same_entity = entity == gate}
+  end
+  trace(p, "setup", {start = start, goal = goal, opening_calibration = Fixtures.opening,
+    gate_box = gate.bounding_box, actor_box = actor.prototype.collision_box,
+    neighbours = neighbours, route_source = "authored-action-fixture-not-PlanningRun"})
+  p.action, p.rejection = Action.new(gate, actor, start, goal, Fixtures.opening)
+  return p
+end
+
 function Probe.start(fixture, index)
   local surface = game.create_surface("scv-gate-actions-" .. index, {
     seed = Fixtures.seed, default_enable_all_autoplace_controls = false,
@@ -44,26 +73,8 @@ function Probe.start(fixture, index)
   actor.destructible = false
   actor.character_running_speed_modifier = fixture.speed_modifier
   if fixture.circuit then circuit(wall) end
-  local p = {fixture = fixture, actor = actor, gate = gate, wall = wall, surface = surface,
-    start = start, goal = goal, started_tick = game.tick, previous_position = copy(actor.position),
-    follower = {path = {goal}, waypoint_index = 1, segment_start = copy(start)},
-    assertions = {}, timeline = {}, metrics = {running_speed = actor.character_running_speed,
-      stationary_command_ticks = 0, slowed_command_ticks = 0, actual_distance = 0,
-      max_lateral_error = 0, follower_replans = 0, action_replans = 0, opened_tick = -1,
-      first_movement_tick = -1, mutation_tick = -1, invalidation_tick = -1}}
-  assert_case(p, "real-closed-gate", gate.valid and gate.type == "gate" and gate.is_closed())
-  assert_case(p, "production-validator-remains-conservative-on-closed-gate",
-    not PathSmoothing.path_is_clear(surface, actor, start, {goal}, 0))
-  local neighbours = {}
-  for direction, entity in pairs(gate.neighbours or {}) do
-    neighbours[#neighbours + 1] = {direction = direction, type = entity.type,
-      position = copy(entity.position), same_entity = entity == gate}
-  end
-  trace(p, "setup", {start = start, goal = goal, opening_calibration = Fixtures.opening,
-    gate_box = gate.bounding_box, actor_box = actor.prototype.collision_box,
-    neighbours = neighbours, route_source = "authored-action-fixture-not-PlanningRun"})
-  p.action, p.rejection = Action.new(gate, actor, start, goal, Fixtures.opening)
-  return p
+  return Probe.arm({fixture = fixture, actor = actor, gate = gate, wall = wall, surface = surface,
+    start = start, goal = goal}, game.tick)
 end
 
 local function finish(p, terminal, reason)
