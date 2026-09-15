@@ -246,6 +246,17 @@ function Adapter.issue(run, fixture, context)
   return begin_planning(run, fixture, context, "episode-command", false)
 end
 
+-- Experimental execution policies use the same request sequence and follower
+-- activation as baseline episodes. Superseding pending work must invalidate it
+-- before another asynchronous result can arrive.
+function Adapter.replan(run, fixture, context, reason)
+  local previous = run.navigation.planning_run
+  if previous and previous.status == "running" then
+    PlanningRun.cancel(previous, reason or "corridor-invalidated", {tick = context.tick})
+  end
+  return begin_planning(run, fixture, context, reason or "corridor-invalidated", true)
+end
+
 function Adapter.handle_path_result(run, fixture, event, context)
   local navigation = run.navigation
   local planning_run = navigation.planning_run

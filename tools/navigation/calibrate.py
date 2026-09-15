@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Run real-domain calibration twice in isolated headless Factorio instances.
+"""Run native domain probes and execution experiments in headless Factorio.
 
-These are physical measurement probes, not claims about planner capabilities.
+Each domain declares its calibrated or experimental scope, not a blanket claim
+of production planner support. Repeated runs must agree on full case records.
 The scenario reports semantic completion; elapsed-time limits only fail a run.
 """
 from __future__ import annotations
@@ -18,6 +19,10 @@ import time
 
 from live import executable_path, free_port, hidden_flags, json_text
 from solve import reject_constant, reject_pairs
+
+SCENARIOS = {"gates": "gate-calibration", "belts": "belt-calibration",
+             "gate-actions": "gate-actions", "dynamic": "corridor-execution", "belt-controller": "belt-controller"}
+EXECUTION_DOMAINS = ["gate-actions", "dynamic", "belt-controller"]
 
 
 def validate_report(report: dict, domain: str, passed: int, failed: int) -> None:
@@ -71,7 +76,7 @@ def run(root: Path, binary: Path, domain: str, artifact: Path, timeout: float) -
     settings.write_text(json_text({"name": "SCV domain calibration", "description": "Isolated native-domain measurements",
         "visibility": {"public": False, "lan": False},
         "auto_pause": False, "autosave_interval": 0, "require_user_verification": False}), encoding="utf-8")
-    scenario = "gate-calibration" if domain == "gates" else "belt-calibration"
+    scenario = SCENARIOS[domain]
     command = [str(binary), "--config", str(config), "--mod-directory", str(mods),
         "--start-server-load-scenario", "scv-control-testkit/" + scenario, "--map-gen-seed", "424242", "--server-settings", str(settings),
         "--bind", "127.0.0.1:" + str(free_port(socket.SOCK_DGRAM)), "--disable-audio"]
@@ -110,7 +115,7 @@ def run(root: Path, binary: Path, domain: str, artifact: Path, timeout: float) -
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--domain", choices=["gates", "belts", "all"], default="all")
+    parser.add_argument("--domain", choices=[*SCENARIOS, "all", "execution"], default="all")
     parser.add_argument("--project-root", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--factorio-exe")
     parser.add_argument("--timeout", type=float, default=90)
@@ -128,7 +133,9 @@ def main(argv: list[str] | None = None) -> int:
         expected = json.loads((root / "info.json").read_text(encoding="utf-8-sig"))["factorio_version"]
         if not version.startswith("Version: " + expected + "."):
             raise ValueError("Factorio version does not match mod")
-        for domain in (["gates", "belts"] if args.domain == "all" else [args.domain]):
+        domains = (["gates", "belts"] if args.domain == "all" else
+                   EXECUTION_DOMAINS if args.domain == "execution" else [args.domain])
+        for domain in domains:
             reports[domain] = []
             for index in range(args.repeat):
                 print(f"[{domain}] Headless calibration {index + 1}/{args.repeat}", flush=True)

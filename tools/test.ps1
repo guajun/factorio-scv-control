@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [ValidateSet("smoke", "integration", "benchmark", "episodes", "calibration", "interchange", "live", "all")]
+  [ValidateSet("smoke", "integration", "benchmark", "episodes", "calibration", "execution", "interchange", "live", "all")]
   [string]$Suite = "all",
   [string]$FactorioExe = $env:FACTORIO_EXE,
   [string]$PythonExe = "python",
@@ -429,6 +429,11 @@ enable-new-mods=true
     Write-Host "[calibration] Running repeated real gate/belt measurements headlessly" -ForegroundColor Cyan
     & $PythonExe (Join-Path $projectRoot "tools/navigation/calibrate.py") --domain all --factorio-exe $factorio --timeout $TimeoutSeconds
     if ($LASTEXITCODE -ne 0) { throw "Native domain calibration failed." }
+  }
+  if ($Suite -in @("execution", "all")) {
+    Write-Host "[execution] Running repeated gate/dynamic/belt execution experiments headlessly" -ForegroundColor Cyan
+    & $PythonExe (Join-Path $projectRoot "tools/navigation/calibrate.py") --domain execution --factorio-exe $factorio --timeout $TimeoutSeconds
+    if ($LASTEXITCODE -ne 0) { throw "Domain execution experiments failed." }
   }
   if ($Suite -in @("interchange", "all")) {
     Invoke-IntegrationSuite $factorio $configPath $modsRoot $writeData $resolvedTestRoot "interchange"
