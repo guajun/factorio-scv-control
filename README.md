@@ -41,6 +41,8 @@ The default command runs smoke, engine-backed integration, pathfinding benchmark
 
 Completed foundations and upcoming automatic gates, dynamic-world invalidation, and belt-aware search are tracked in the [SC2-like navigation architecture plan](docs/navigation-architecture-plan.md). The [game navigation research](docs/navigation-industry-research.md) explains the design decisions, and the [external solver boundary draft](docs/navigation-solver-boundary.md) defines planned capture/replay, adapters, validation, and headless/GUI execution.
 
+The [domain execution design](docs/navigation-domain-execution-plan.md) specifies gate opening actions, remaining-corridor invalidation, and measured belt compensation, including the boundaries between isolated experiments and production planner integration. Run `tools/test.ps1 -Suite execution` for their repeated headless checks.
+
 Navigation profile schemas, registry ownership, capability validation, and storage boundaries are documented in the [navigation extension contract](docs/navigation-extension-contract.md).
 
 Create or refresh the interactive test save with:
