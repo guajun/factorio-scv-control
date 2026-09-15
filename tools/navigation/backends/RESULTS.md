@@ -1,8 +1,9 @@
 # First source-topology comparison — 2026-09-15
 
 This is a bounded offline experiment, not a production backend switch or a claim
-of optimal Factorio movement. Native follower replay of these new paths has **not
-yet run**; all generated case records say `replay_status: not-run`.
+of optimal Factorio movement. The initial standalone comparison did not execute
+Factorio (`replay_status: not-run`). The integration follow-up below now supplies
+separate native collision/trajectory/follower evidence for the same results.
 
 ## Reproducible input and environment
 
@@ -102,16 +103,24 @@ would need its own measured build/update/query lifecycle.
   `tools/navigation/backends/artifacts/measured/`: `comparison.json`,
   `solver-bundle.json`, and `imported_plans.lua` (ignored, not vendored).
 
-The integration owner must admit the new backend ID in the imported-route
-registry and replay the generated bundle in an isolated TestKit copy. Preserve
-the existing production validators, score/follower path, original source facts,
-and fresh backend-specific `NavigationDataRef`; do not rename the new graph as
-`factorio-captured-grid-v1` to bypass capability admission. Record acceptance,
-arrival, realized distance and failure reasons across all 11 cases before using
-these geometric lengths to choose a production direction.
+The integration owner added **offline-only** backend admission and two engine
+conformance checks: imported topology retains shared validators, and it cannot
+silently enable the live backend. `replay_bundle.py` validated the exact solver
+bundle and ran all 11 cases in an isolated project copy: **33 assertions passed**,
+all ten complete routes arrived; the bounded no-path remains rejected rather
+than being treated as arrival. Neither `production-v1` nor its validators or
+follower were changed.
+
+Native manifest: local temp `scv-bundle-replay-yy0qxgtz/manifest.json`.
+Replay reports/raw and accepted routes: local temp
+`factorio-scv-agent-test-461d06a5f33242a098c5094b63eee605/write-data/script-output/scv-control/navigation/`.
+These are machine-local diagnostic locations, not portable checked-in fixtures.
+Reproduce using the README's compare and replay commands. The full-wave test
+counts are documented in `docs/project-progress.md`, separately from the
+specialist's pre-integration validation above.
 
 Decision from this first pass: the source-geometry boundary is executable and
 can compare a real third-party topology builder without grid retuning or via
-heuristics. Keep it optional while native replay checks the remaining clearance
-assumption. Dynamic updates, actual gates, belts, temporal costs, native search
+heuristics. The bounded native replay now passes, but keep it optional pending
+broader evaluation. Dynamic updates, actual gates, belts, temporal costs, native search
 cancellation, and larger-world watchdog/cache behavior are still unsupported.

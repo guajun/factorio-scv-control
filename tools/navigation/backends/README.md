@@ -75,11 +75,22 @@ and query hashes, and receives a new snapshot ID, query hash and data reference:
 grid generation. Original and derived graph paths are not claimed to have the
 same discretization.
 
-Native replay needs the integration owner to allow this backend ID for
-`imported-route` in the candidate provider registry. The emitted bundle then uses
-the existing import validator, distance scorer, and follower without another
-acceptance path. Until that integration executes, `replay_status = not-run` is
-explicit in the report. No GUI or Factorio process is started by this backend CLI.
+The integrated branch permits this backend ID for **offline** `imported-route`
+only. Replay the data-only solver bundle through the existing validator, scorer
+and native follower:
+
+```powershell
+python tools/navigation/replay_bundle.py --bundle tools/navigation/backends/artifacts/comparison/solver-bundle.json
+```
+
+This command validates the bundle, generates an import only in a fresh isolated
+project copy, and runs the shared headless interchange scenario. It retains a
+manifest and raw/accepted replay paths. All 11 first-pass cases passed 33 native
+assertions; ten complete routes arrived. Backend-only comparison records keep
+`replay_status=not-run` because that CLI does not execute Factorio; the separate
+correlated replay report provides the execution evidence. The live provider and
+ordinary-save default are unchanged. Existing GUI import/preview adapters remain
+available, but no GUI peer/preview was tested in this wave.
 
 ## Primary sources and licenses
 

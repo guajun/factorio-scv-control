@@ -66,6 +66,19 @@ function Tests.run(expect)
     and #progress.candidates[1].validator_results == 2 and progress.route.predicted.distance == 4
     and progress.route.values.scored_objective.units == "tiles", progress)
 
+  local topology_query, topology_result, topology_runtime = fixture()
+  topology_query.data_ref.backend_id = "extremity-source-polygons-v1"
+  topology_query.query_hash = assert(Boundary.hash_query(topology_query))
+  topology_result.data_ref = copy(topology_query.data_ref)
+  topology_result.query_hash = topology_query.query_hash
+  topology_runtime.navigation_data_ref = copy(topology_query.data_ref)
+  local topology_run, topology_progress = start(topology_query, topology_runtime)
+  expect("boundary.topology_import_keeps_shared_validators", topology_run and topology_progress.status == "success"
+    and #topology_progress.candidates[1].validator_results == 2, topology_progress)
+  topology_run, topology_progress = start(topology_query, topology_runtime, "external-distance-v1")
+  expect("boundary.offline_topology_does_not_enable_live_backend", not topology_run
+    and topology_progress.code == "unsupported-backend", topology_progress)
+
   local bad = copy(query)
   bad.goal.x = 5
   local valid, detail = Boundary.validate_query(bad)

@@ -25,7 +25,7 @@ return Registry.create("candidate_providers", {
     provides = {"candidate-route"}, requires = {"surface-collision-query"},
     query_support = {
       objectives = {"distance"},
-      backends = {"factorio-captured-grid-v1", "reference-graph-v1"},
+      backends = {"factorio-captured-grid-v1", "reference-graph-v1", "extremity-source-polygons-v1"},
       capabilities = {"directed-graph-v1", "distance", "directed-edge-costs", "finite-bounds"}
     }
   },

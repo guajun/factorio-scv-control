@@ -4,6 +4,39 @@ New entries go at the top. Keep failed hypotheses and operational mistakes: the 
 
 Each entry should state the question, exact fixture/version, measured result, falsified assumption, and decision. Generated JSON remains the source of exact per-path data; this document records why the result changed the design.
 
+## 2026-09-15 - Parallel native-domain calibration and source-polygon replay
+
+**Question:** With bulk transport no longer the primary blocker, can independent domain and topology work use the same headless/acceptance foundation without changing production behavior?
+
+**Frozen scopes:** Framework base `a770ae4`, Factorio 2.0.77. Gate fixture-v1 uses a real gate at `(0.5,0.5)`, adjacent walls, eastbound unassociated native characters from `(-12.5,0.5)` to `x>=12.5`, same-force/enemy, speed modifiers 0/4, and passive/explicit request. Belt fixture-v1 uses grass-1 and eight ground controls plus 48 uniform-field cases: three tiers, four cardinal directions, four relative commands, six-tile command progress. Calibration uses fixed map seed 424242, gate surface seed 82451, and base + SCV + TestKit only (DLC disabled). Each domain runs twice and compares complete assertions, metrics and normalized timelines. These are physical probes, not copied planners or follower algorithms.
+
+**Gate findings:** Six cases / 46 assertions pass in each seeded run. Normal passive/explicit approaches clear the gate collision extent at tick 91 and reach the far endpoint at 169 without contact. At 5x speed, passive opening completes at 21, collision clearance at 23 and endpoint at 38, with five slowed / three stationary commanded ticks. Proactive opening completes at 16, clearance at 18 and endpoint at 34, without slowed/contact ticks. The tested 13-tile request lead is sufficient, not a proven minimal-distance rule. Enemy cases require real contact, a distant friendly positive-control open/close cycle, and crossing after removing only the enemy gate; this proves a local blocker, not global no-path. Final specialist evidence: local temp `scv-calibration-ouz_z507`.
+
+**Gate failed hypotheses:** Incompatible `request_to_open` throws a Lua error rather than silently rejecting. The probe now catches/asserts the specific force error. Unseeded processes had several ticks of passive timing variance; exact comparison correctly rejected them instead of dropping timing fields. `extra_time=120` did not guarantee a 120-tick minimum hold during approach: the fast explicit gate began closing at tick 24 and was closed at 39. Automatic interaction replacing the timer is only a hypothesis, not a measured internal cause. Circuit control, allied-but-distinct forces and GUI-player equivalence remain open in #8; #9 is not implemented by this probe.
+
+**Belt findings:** All 56 cases pass twice with identical per-tick records. Measured ground cardinal speed is `0.1484375` tiles/tick despite the `0.15` runtime speed property. In these uniform fields, measured ground displacement plus the belt vector predicts all 48 means with zero residual. Representative eastward fields:
+
+| Case | Measured displacement/tick `(x,y)` | Ticks to six-tile command progress | Cross-track drift |
+| --- | --- | ---: | ---: |
+| Ground east | `(0.1484375,0)` | 41 | 0 |
+| Yellow east, with | `(0.1796875,0)` | 34 | 0 |
+| Yellow east, against | `(-0.1171875,0)` | 52 | 0 |
+| Express east, with | `(0.2421875,0)` | 25 | 0 |
+| Express east, against | `(-0.0546875,0)` | 110 | 0 |
+| Express east, command south | `(0.09375,0.1484375)` | 41 | 3.84375 tiles |
+
+The lateral displacement is not automatically compensated: raw commands are the control. This does not validate the existing follower on belts or a faster-route planner. No immunity equipment, field boundaries, turning belts, dynamic changes or cost-aware search is covered yet. Record `factorio-native-uniform-belts-v1` as bounded calibration input, not a universal motion law. Evidence: local temp `scv-calibration-h8aw941u`.
+
+**Third-party topology:** Pinned extremitypathfinder 2.7.2 with Shapely 2.1.2 / GEOS 3.13.1, NumPy 1.26.4, NetworkX 3.5, isolated Python 3.12.14. Source wall rectangles and tile facts build configuration-space polygons; the exported trajectory margin is retained, with a separately declared 1/256-tile contact guard. No occupied grid cells or extra half-cell-diagonal inflation build the new topology. This is restricted static stone-wall geometry, not Recast, live belts/gates or a dynamic mesh.
+
+All 11 fixture-v4 cases remain: ten complete and one disconnected-domain no-path. The ten library routes agree with the existing Dijkstra on that library's exported query graph. `tight-clearance-corridor` is **20.066104 tiles** versus the captured-grid control's **23.219122**; `long-wall-return` is 25.553298 vs 28.253505; `captured-slalom-return` is 35.103094 vs 38.358487. These compare different representations explicitly; they are not evidence that changing language improves an identical graph. For tight, geometry/build/search/warm-search measured 1.918/2.346/0.765/0.757 ms; total comparison work including source checks and controls is 223.252 ms, not a game command-latency measurement.
+
+The integration owner admits the new backend for **offline imported routes only**, with shared-validator and live-backend-rejection assertions. The full generated bundle then passed **33 native interchange assertions**, including arrival for all ten complete paths; no collision/follower acceptance code was bypassed. First integration replay artifact: local temp `factorio-scv-agent-test-653b6705533e42c495585468d9f3ad4b`, isolated project `scv-topology-replay-dc4154ea44c3490b8ecdef2f956022af`. The backend-only comparison intentionally says `replay_status=not-run`; the separate correlated Factorio report supplies execution evidence.
+
+**Operational pitfalls:** The first calibration launcher omitted the required server `description` and failed before scenario startup; fixed without launching GUI. Python 3.14 could not satisfy the library's NumPy <2 wheel constraint, so the specialist used a separate pinned 3.12 environment rather than overriding dependencies. Third-party dependency installation is optional, never a production-mod or default-test prerequisite.
+
+**Decision:** Promote the first calibration slices and replay experiment for review, not the algorithms into `production-v1`. Continue #8/#10 matrices before #9/#2 policy, and retain #11's known inserted-wall failure until real proactive invalidation passes. #17 still needs update/memory/larger-domain/capability work; #16 warm caching and GUI lifecycle remain independent. Full-wave validation and branch-level delivery are recorded in [project progress](project-progress.md).
+
 ## 2026-09-15 - Move bulk snapshots out of the synchronized command channel
 
 **Question:** Is the 18-second local snapshot transfer inherent to external solving, and can a supported transport replace the serial RCON downloads?
