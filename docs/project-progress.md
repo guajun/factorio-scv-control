@@ -9,9 +9,10 @@ contains the external framework;
 [PR #19](https://github.com/guajun/factorio-scv-control/pull/19) contains native
 calibration and source-polygon replay, stacked on #18's branch. The new
 execution wave is [PR #20](https://github.com/guajun/factorio-scv-control/pull/20)
-on `codex/domain-execution-wave`, following #19. The saved-map follow-up is on
-`codex/save-backed-testbench`, based on execution commit `0f07a87`. The preceding
-three PRs remain unmerged as of this checkpoint; review the foundation first.
+on `codex/domain-execution-wave`, following #19. The saved-map follow-up is
+[PR #21](https://github.com/guajun/factorio-scv-control/pull/21) on
+`codex/save-backed-testbench`, based on execution commit `0f07a87`. All four PRs
+remain unmerged as of this checkpoint; review the foundation first.
 
 ## Delivery state
 
