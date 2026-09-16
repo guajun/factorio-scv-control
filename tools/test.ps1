@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [ValidateSet("smoke", "integration", "benchmark", "episodes", "calibration", "execution", "savebench", "compare", "interchange", "live", "stepped", "all")]
+  [ValidateSet("smoke", "integration", "benchmark", "episodes", "calibration", "execution", "savebench", "compare", "unified", "interchange", "live", "stepped", "all")]
   [string]$Suite = "all",
   [string]$FactorioExe = $env:FACTORIO_EXE,
   [string]$PythonExe = "python",
@@ -450,6 +450,11 @@ enable-new-mods=true
     if ($TopologyPython) { $comparisonArgs += @("--topology-python", $TopologyPython) }
     & $PythonExe @comparisonArgs
     if ($LASTEXITCODE -ne 0) { throw "Saved-map solver comparison failed." }
+  }
+  if ($Suite -in @("unified", "all")) {
+    Write-Host "[unified] Loading one lab save and checking 89 fixed runs plus native actor lifecycle headlessly" -ForegroundColor Cyan
+    & $PythonExe (Join-Path $projectRoot "tools/navigation/unified_lab.py") --test --factorio-exe $factorio --timeout $TimeoutSeconds
+    if ($LASTEXITCODE -ne 0) { throw "Unified test lab saved-map tests failed." }
   }
   if ($Suite -eq "all") {
     Write-Host "[solver] Running host protocol and graph-search conformance tests" -ForegroundColor Cyan
