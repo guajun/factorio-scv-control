@@ -49,7 +49,9 @@ Navigation profile schemas, registry ownership, capability validation, and stora
 
 The [saved solver comparison](docs/saved-solver-comparison.md) adds eleven static source maps and a 44-row native matrix for production-v1, grid A*, Dijkstra and source polygons. Run `tools/test.ps1 -Suite compare`; the default `all` suite includes it and requires the documented pinned topology-worker environment. Reports separate accepted distance, actual movement, map construction, solver queries and transport/admission time.
 
-Create or refresh the interactive test save with:
+For all current experiments in **one save**, use the [unified test lab](docs/unified-test-lab.md). Its 56-case menu includes static comparison, real gates, dynamic edits and belts, plus free right-click play. External paths are explicitly fixed recorded references; free play uses production navigation. `tools/test.ps1 -Suite unified` validates the generated ZIP headlessly and is included in `all`.
+
+Create or refresh the older interactive zone save with:
 
 ```powershell
 pwsh -File .\tools\create-test-save.ps1 -Force

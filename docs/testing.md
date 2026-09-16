@@ -33,6 +33,7 @@ Available suites:
 | `execution` | Repeated gate actions, dynamic corridor response and belt controller experiments, including historical controls. |
 | `savebench` | Loads all 45 persistent gate/dynamic/belt source ZIPs and verifies native outcomes without rebuilding geometry. |
 | `compare` | Loads eleven static source ZIPs with four configurations each; same-graph references, shared native execution and separate timing scopes. Requires the pinned topology worker. |
+| `unified` | Loads the generated single lab ZIP, selects 56 shared cases, completes 89 fixed runs and native actor lifecycle checks. Reports unavailable GUI coverage explicitly; never starts a GUI. |
 | `interchange` | Bounded fixture capture, query/hash conformance, import rejection, and actual follower replay. |
 | `live` | Starts the isolated loopback headless/RCON lab and asserts external result delivery, native arrival and lifecycle rejection. |
 | `stepped` | Loads a real source save and verifies exact native clock stepping around external solver waits. |

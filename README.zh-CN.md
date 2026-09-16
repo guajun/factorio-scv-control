@@ -43,9 +43,11 @@ pwsh -File .\tools\test.ps1
 
 已完成的基础模块，以及后续自动闸门、动态世界失效和传送带寻路，统一记录在 [SC2-like 导航架构计划](docs/navigation-architecture-plan.md)。[游戏工业寻路调研](docs/navigation-industry-research.md)记录设计依据；[外部 solver 边界草案](docs/navigation-solver-boundary.md)定义后续的数据捕获与回放、算法适配、验证及无头/GUI 执行闭环。
 
-当前 Lua profile、registry、能力校验和存储边界见[导航扩展契约](docs/navigation-extension-contract.md)。外部 solver 草案尚未实现。
+当前 Lua profile、registry、能力校验和存储边界见[导航扩展契约](docs/navigation-extension-contract.md)。外部 solver 的存档比较、准入与原生执行见[存档算法比较](docs/saved-solver-comparison.md)。
 
-创建或刷新交互测试存档：
+全部新实验现在提供[单存档测试大厅](docs/unified-test-lab.md)：56 个可选案例，覆盖静态寻路、真实闸门、动态变化和传送带；可以运行、重置，也保留自由右键。外部算法是标明来源的固定参考回放，自由右键仍使用生产 planner。`tools/test.ps1 -Suite unified` 加载生成的同一存档进行纯 headless 验证，已加入 `all`。
+
+创建或刷新旧版分区交互存档：
 
 ```powershell
 pwsh -File .\tools\create-test-save.ps1 -Force

@@ -11,6 +11,8 @@ local PathMath = require('__factorio-scv-control__/scripts/path_math')
 local Canonical = require('__factorio-scv-control__/scripts/navigation/canonical')
 local Serializable = require('__factorio-scv-control__/scripts/navigation/serializable')
 local WireJson = require('__factorio-scv-control__/scripts/navigation/wire_json')
+local Boundary = require('__factorio-scv-control__/scripts/navigation/solver_boundary')
+local NavigationData = require('__factorio-scv-control__/scripts/navigation/navigation_data')
 
 local Runtime = {PROTOCOL = Contract.PROTOCOL}
 local ROOT = 'scv-control/comparison/'
@@ -18,7 +20,8 @@ local RESULT_PATH, FACTS_PATH, WORK_PATH = ROOT .. 'result.json', ROOT .. 'facts
 local PERFORMANCE_PATH = ROOT .. 'performance.jsonl'
 local loaded_from_save, runtime_build_calls = false, 0 -- diagnostic only; never govern synchronized state
 local profiles = {}
-local function enabled() return remote.interfaces.scv_navigation_comparison ~= nil end
+local function lab_enabled() return remote.interfaces.scv_unified_lab ~= nil end
+local function enabled() return remote.interfaces.scv_navigation_comparison ~= nil or lab_enabled() end
 local function state() return storage.scv_navigation_comparison end
 local function point(value) return {x = value.x, y = value.y} end
 local function copy(value) return assert(Serializable.copy(value)) end
@@ -124,6 +127,8 @@ local function report(s, terminal)
     source_query_hash = s.capture and s.capture.query.query_hash or false,
     source_prepared_tick = s.prepared_tick, completed_tick = game.tick,
     plans = s.plans, native = native, passed = passed, assertions = assertions,
+    reference_playback = s.reference_playback == true, not_fresh_solver = s.reference_playback == true,
+    reference_provenance = s.reference_provenance or false,
     performance_path = PERFORMANCE_PATH, paused_solver_correctness = s.algorithm ~= 'production-v1'}
 end
 
@@ -153,6 +158,8 @@ local function fail(s, reason)
 end
 
 local function watch(player)
+  -- The unified hub owns its spectator/free-control lifecycle and camera.
+  if lab_enabled() then return end
   local s = state()
   if not s or not s.actor or not s.actor.valid then return end
   player.set_controller({type = defines.controllers.spectator})
@@ -169,6 +176,20 @@ local function prepare(s, id)
   if not case then return error_reply('unknown-case') end
   game.tick_paused, game.ticks_to_run = true, 0
   local surface = Capture.ensure_surface('scv-navigation-comparison-source')
+  if lab_enabled() then
+    -- A previous scene's out-of-map tiles erase the substrate. Reapplying
+    -- concrete directly would look right but omit its hidden grass layer and
+    -- fail the original source-facts identity. Restore real native substrate
+    -- before the shared fixture authoring step; never mask this difference in
+    -- the facts hash or modify an authoritative ZIP during replay.
+    local substrate = {}
+    for x = Fixtures.AREA[1][1], Fixtures.AREA[2][1] - 1 do
+      for y = Fixtures.AREA[1][2], Fixtures.AREA[2][2] - 1 do
+        substrate[#substrate + 1] = {name = 'grass-1', position = {x, y}}
+      end
+    end
+    surface.set_tiles(substrate, true, false, false, false)
+  end
   -- The fixture builder is called only while authoring. Saved replays never use
   -- Fixtures.build, Capture.fixture or Replay.prepare.
   Fixtures.build(surface, case.fixture)
@@ -201,6 +222,84 @@ local function prepare(s, id)
     color = {r = 1, g = 1, b = 1}, text = case.id .. '\n/scv-compare plan | run | pause | status'})
   for _, player in pairs(game.connected_players) do watch(player) end
   return status()
+end
+
+-- Hub-only scene lifecycle. Standalone authoritative source saves retain their
+-- one-authoring-call boundary; these methods never exist as ordinary-save RPCs.
+function Runtime.lab_release()
+  if not lab_enabled() then return error_reply('unified-lab-required') end
+  local s = state()
+  if not s then
+    storage.scv_navigation_comparison = {phase = 'idle', schema_version = 1, plans = {}, lab_sequence = 0}
+    return status()
+  end
+  local surface = s.surface
+  if surface and surface.valid then
+    if not s.lab_owned_surface_index or s.lab_owned_surface_index ~= surface.index
+      or surface.name ~= 'scv-navigation-comparison-source' then return error_reply('lab-surface-not-owned') end
+    for _, player in pairs(game.players) do
+      if player.valid and player.surface == surface then return error_reply('lab-scene-has-player') end
+      if player.valid and player.character and player.character.valid and player.character.surface == surface then
+        return error_reply('lab-scene-has-player-character')
+      end
+    end
+  end
+  game.tick_paused, game.ticks_to_run = true, 0
+  if s.planning_run and s.planning_run.status == 'running' then
+    PlanningRun.cancel(s.planning_run, 'unified-lab-scene-replaced', {tick = game.tick})
+  end
+  if s.actor and s.actor.valid then Follower.stop(s.actor); s.actor.destroy() end
+  if surface and surface.valid then
+    for _, object in pairs(rendering.get_all_objects()) do
+      if object.valid and object.surface == surface then object.destroy() end
+    end
+  end
+  storage.scv_navigation_comparison = {phase = 'idle', schema_version = 1, plans = {},
+    lab_sequence = s.lab_sequence or 0, lab_owned_surface_index = s.lab_owned_surface_index}
+  profiles = {}
+  helpers.write_file(PERFORMANCE_PATH, '', false, 0)
+  return status()
+end
+
+function Runtime.lab_select(id)
+  if not lab_enabled() then return error_reply('unified-lab-required') end
+  if not Catalog.get(id) then return error_reply('unknown-case') end
+  local existing = game.get_surface('scv-navigation-comparison-source')
+  if existing and (not state() or state().lab_owned_surface_index ~= existing.index) then
+    return error_reply('lab-surface-not-owned')
+  end
+  local released = Runtime.lab_release()
+  if not released.ok then return released end
+  local s = state()
+  s.lab_sequence = (s.lab_sequence or 0) + 1
+  local response = prepare(s, id)
+  if s.surface and s.surface.valid then s.lab_owned_surface_index = s.surface.index end
+  return response
+end
+
+function Runtime.lab_actor()
+  if not lab_enabled() then return nil end
+  local s = state()
+  return s and s.case and s.actor and s.actor.valid and s.actor or nil
+end
+
+function Runtime.lab_suspend()
+  if not lab_enabled() then return error_reply('unified-lab-required') end
+  local s = state()
+  if not s or not s.case then return error_reply('source-required') end
+  if s.planning_run and s.planning_run.status == 'running' then
+    PlanningRun.cancel(s.planning_run, 'unified-lab-manual-control', {tick = game.tick})
+  end
+  if s.actor and s.actor.valid then Follower.stop(s.actor) end
+  s.phase, s.auto_execute = 'manual', false
+  return status()
+end
+
+function Runtime.lab_result()
+  if not lab_enabled() then return nil end
+  local s = state()
+  if not s or not s.case or not s.report_available then return nil end
+  return report(s, s.planning_result and s.planning_result.status == 'no-path' and 'no-path' or nil)
 end
 
 local function capture(s, message)
@@ -317,6 +416,106 @@ local function commit(s, message)
   s.execution_query, s.execution_snapshot = values.admitted.query, values.admitted.snapshot
   s.planning_run, s.solver_result, s.reason = values.run, values.admitted.result, nil
   s.upload, s.upload_bytes, s.upload_next = nil, nil, nil
+  planned(s, values.result)
+  return status()
+end
+
+-- A recorded candidate is explicitly playback, not a pretend in-game solver.
+-- Rebind it to observations of this scene and invoke the same imported-route
+-- acceptance pipeline. No renderer or direct path-to-follower shortcut exists.
+function Runtime.lab_plan_recording(record, algorithm)
+  if not lab_enabled() then return error_reply('unified-lab-required') end
+  local s = state()
+  if not s or s.phase ~= 'prepared' then return error_reply('recording-requires-prepared-source') end
+  if algorithm ~= 'grid-astar' and algorithm ~= 'grid-dijkstra' and algorithm ~= 'source-polygons' then
+    return error_reply('unknown-recorded-algorithm')
+  end
+  if type(record) ~= 'table' or record.id ~= s.case.id or record.fixture_version ~= s.case.fixture_version
+    or record.source_facts_hash ~= s.source_facts_hash then return error_reply('recording-source-identity-mismatch') end
+  if type(record.source_save_sha256) ~= 'string' or #record.source_save_sha256 ~= 64
+    or not record.source_save_sha256:match('^[0-9a-f]+$') then return error_reply('recording-source-save-hash-required') end
+  local candidate = record.algorithms and record.algorithms[algorithm]
+  if type(candidate) ~= 'table' or (candidate.outcome ~= 'complete' and candidate.outcome ~= 'no-path')
+    or type(candidate.points) ~= 'table' or #candidate.points > 8194
+    or type(candidate.source_snapshot_hash) ~= 'string' or type(candidate.source_query_hash) ~= 'string' then
+    return error_reply('invalid-recorded-candidate')
+  end
+  local points = copy(candidate.points)
+  if candidate.outcome == 'complete' then
+    if #points < 2 then return error_reply('recorded-path-endpoints-required') end
+    for _, p in ipairs(points) do
+      if type(p) ~= 'table' or type(p.x) ~= 'number' or type(p.y) ~= 'number'
+        or p.x ~= p.x or p.y ~= p.y or math.abs(p.x) == math.huge or math.abs(p.y) == math.huge then
+        return error_reply('invalid-recorded-point')
+      end
+    end
+    if Canonical.encode(points[1]) ~= Canonical.encode(s.case.start)
+      or Canonical.encode(points[#points]) ~= Canonical.encode(s.case.goal) then
+      return error_reply('recorded-path-command-endpoints-changed')
+    end
+    if type(candidate.predicted_distance) ~= 'number' or candidate.predicted_distance ~= candidate.predicted_distance
+      or math.abs(PathMath.polyline_distance(s.case.start, points) - candidate.predicted_distance) > 1e-7 then
+      return error_reply('recorded-distance-mismatch')
+    end
+  elseif #points ~= 0 then return error_reply('recorded-no-path-has-points') end
+  local captured = capture(s, {include_graph = false})
+  if not captured.ok then return captured end
+  local snapshot, query = copy(s.capture.snapshot), copy(s.capture.query)
+  snapshot.snapshot_id = snapshot.snapshot_id .. ':recorded:' .. algorithm
+  snapshot.graph = {nodes = {}, edges = {}, representation = {id = 'recorded-reference-playback-v1',
+    algorithm = algorithm, not_fresh_solver = true, source_save_sha256 = record.source_save_sha256,
+    source_snapshot_hash = candidate.source_snapshot_hash, source_query_hash = candidate.source_query_hash}}
+  local graph = snapshot.graph
+  if candidate.outcome == 'complete' then
+    for index, p in ipairs(points) do
+      local id = index == 1 and 'start' or index == #points and 'goal' or ('recorded:' .. index)
+      graph.nodes[index] = {id = id, position = point(p)}
+      if index > 1 then graph.edges[#graph.edges + 1] = {from = graph.nodes[index - 1].id,
+        to = id, distance = PathMath.distance(points[index - 1], p)} end
+    end
+  else graph.nodes = {{id = 'start', position = point(query.start)}, {id = 'goal', position = point(query.goal)}} end
+  local data, data_error = NavigationData.new({backend_id = 'reference-graph-v1', backend_version = '1',
+    session_id = query.session_id .. ':recorded', config = graph.representation})
+  if not data then return error_reply('recording-data:' .. data_error.code) end
+  local data_ref, load_error = NavigationData.load_world(data, snapshot)
+  if not data_ref then return error_reply('recording-world:' .. load_error.code) end
+  query.data_ref, query.snapshot_id, query.query_id = data_ref, snapshot.snapshot_id, query.query_id .. ':recorded:' .. algorithm
+  query.required_capabilities = {'directed-graph-v1', 'distance', 'finite-bounds'}
+  query.start_node, query.goal_node = 'start', 'goal'
+  query.query_hash = assert(Boundary.hash_query(query))
+  local result = {protocol = Boundary.PROTOCOL, kind = 'solver-result', query_id = query.query_id,
+    session_id = query.session_id, command_id = query.command_id, attempt_id = query.attempt_id,
+    snapshot_id = query.snapshot_id, query_hash = query.query_hash, data_ref = copy(data_ref),
+    outcome = candidate.outcome, points = points, objective = copy(query.objective),
+    predicted = candidate.outcome == 'complete' and {distance = candidate.predicted_distance} or {},
+    solver = {id = 'recorded-reference-playback', version = '1'}, coverage = copy(snapshot.coverage),
+    metrics = {recorded_algorithm = algorithm, not_fresh_solver = true,
+      source_save_sha256 = record.source_save_sha256, source_snapshot_hash = candidate.source_snapshot_hash,
+      source_query_hash = candidate.source_query_hash}}
+  result.coverage.scope = 'bounded-graph'
+  local valid, validation_error = Boundary.validate_query(query)
+  if not valid then return error_reply('recording-query:' .. validation_error.code) end
+  valid, validation_error = Boundary.validate_result(result, query)
+  if not valid then return error_reply('recording-result:' .. validation_error.code) end
+  s.algorithm, s.pass, s.plan_started_tick = algorithm, 'recorded', game.tick
+  s.reference_playback = true
+  s.reference_provenance = {source_facts_hash = record.source_facts_hash,
+    source_save_sha256 = record.source_save_sha256, source_snapshot_hash = candidate.source_snapshot_hash,
+    source_query_hash = candidate.source_query_hash, not_fresh_solver = true}
+  s.capture = {protocol = Runtime.PROTOCOL, kind = 'comparison-work', id = s.case.id,
+    source_facts_hash = s.source_facts_hash, snapshot = snapshot, query = query}
+  s.execution_query, s.execution_snapshot, s.solver_result = query, snapshot, result
+  local values = profile('recorded:admission', function()
+    local run, progress = PlanningRun.start({schema_version = 1, profile_id = Replay.PROFILE_ID, values = {}}, {
+      id = query.query_id, command_id = query.command_id, adapter_id = 'unified-lab-recorded-playback-v1',
+      reason = 'recorded-reference-playback-not-fresh-solver', start_position = query.start,
+      goal_position = query.goal, navigation_query = query
+    }, {surface = s.surface, actor = s.actor, tick = game.tick, solver_result = result,
+      navigation_data_ref = data_ref, navigation_snapshot = snapshot})
+    return {run = run, result = progress}
+  end)
+  if not values.run or not values.result then return fail(s, 'recording-planning-start-failed') end
+  s.planning_run = values.run
   planned(s, values.result)
   return status()
 end

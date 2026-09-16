@@ -13,7 +13,8 @@ local PERFORMANCE_PATH = "scv-control/savebench/performance.jsonl"
 local loaded_from_save, runtime_build_calls = false, 0
 local hook_profiles = {}
 
-local function enabled() return remote.interfaces.scv_navigation_savebench ~= nil end
+local function lab_enabled() return remote.interfaces.scv_unified_lab ~= nil end
+local function enabled() return remote.interfaces.scv_navigation_savebench ~= nil or lab_enabled() end
 local function point(p) return {x = p.x, y = p.y} end
 local function error_reply(reason) return {ok = false, protocol = Runtime.PROTOCOL, reason = reason} end
 local function json(value) return assert(WireJson.encode(value)) end
@@ -130,6 +131,8 @@ local function annotate(prepared)
 end
 
 local function watch(player)
+  -- The unified hub is responsible for player controller/camera ownership.
+  if lab_enabled() then return end
   local state = saved_state()
   local prepared = state and state.prepared
   if not prepared then return end
@@ -142,13 +145,13 @@ local function watch(player)
     .. " Reload the save to restore the same source entities.")
 end
 
-local function prepare(state, id)
+local function prepare(state, id, lab_sequence)
   if state.phase ~= "idle" then return error_reply("prepare-requires-fresh-marker-map") end
   local case = Catalog.get(id)
   if not case then return error_reply("unknown-case") end
   game.tick_paused, game.ticks_to_run = true, 0
   runtime_build_calls = runtime_build_calls + 1
-  state.prepared = Adapters.prepare(case, runtime_build_calls)
+  state.prepared = Adapters.prepare(case, lab_sequence or runtime_build_calls)
   state.actor_origin = point(state.prepared.actor.position)
   local facts, detail = capture(state.prepared)
   if not facts then return fail(state, "source-capture-failed:" .. detail.code .. ":" .. detail.message) end
@@ -156,6 +159,105 @@ local function prepare(state, id)
   annotate(state.prepared)
   for _, player in pairs(game.connected_players) do watch(player) end
   return status()
+end
+
+function Runtime.lab_release()
+  if not lab_enabled() then return error_reply('unified-lab-required') end
+  local s = saved_state()
+  if not s then
+    storage.scv_navigation_savebench = {phase = 'idle', schema_version = 1, lab_sequence = 0, lab_owned_surfaces = {}}
+    return status()
+  end
+  local prepared, surface = s.prepared, s.prepared and s.prepared.surface
+  local cleanup
+  if surface and surface.valid then
+    local domain = prepared.descriptor.domain
+    local expected_name = domain == 'gate-actions' and ('scv-gate-actions-' .. tostring(s.lab_sequence))
+      or domain == 'dynamic' and 'scv-navigation-episodes'
+      or domain == 'belt-controller' and 'scv-belt-controller'
+    if not s.lab_owned_surface_index or s.lab_owned_surface_index ~= surface.index
+      or surface.name ~= expected_name then return error_reply('lab-surface-not-owned') end
+    for _, player in pairs(game.players) do
+      if player.valid and player.surface == surface then return error_reply('lab-scene-has-player') end
+      if player.valid and player.character and player.character.valid and player.character.surface == surface then
+        return error_reply('lab-scene-has-player-character')
+      end
+    end
+  end
+  game.tick_paused, game.ticks_to_run = true, 0
+  if prepared then
+    Adapters.stop(prepared)
+    if prepared.actor and prepared.actor.valid then prepared.actor.destroy() end
+  end
+  if surface and surface.valid then
+    for _, object in pairs(rendering.get_all_objects()) do
+      if object.valid and object.surface == surface then object.destroy() end
+    end
+    if prepared.descriptor.domain == 'gate-actions' then
+      local name, index = surface.name, surface.index
+      if not game.delete_surface(surface) then return error_reply('lab-owned-gate-surface-delete-failed') end
+      -- Factorio queues surface deletion for the next native update. Do not
+      -- claim that its LuaSurface becomes invalid during this paused command.
+      cleanup = {gate_surface_deletion_queued = true, surface_name = name, surface_index = index}
+    end
+  end
+  storage.scv_navigation_savebench = {phase = 'idle', schema_version = 1, lab_sequence = s.lab_sequence or 0,
+    lab_owned_surfaces = s.lab_owned_surfaces or {}}
+  hook_profiles = {}
+  helpers.write_file(PERFORMANCE_PATH, '', false, 0)
+  local response = status()
+  response.cleanup = cleanup
+  return response
+end
+
+function Runtime.lab_select(id)
+  if not lab_enabled() then return error_reply('unified-lab-required') end
+  local case = Catalog.get(id)
+  if not case then return error_reply('unknown-case') end
+  local target_name = case.domain == 'dynamic' and 'scv-navigation-episodes'
+    or case.domain == 'belt-controller' and 'scv-belt-controller'
+  local target = target_name and game.get_surface(target_name)
+  local current = saved_state()
+  if target and (not current or not current.lab_owned_surfaces
+    or current.lab_owned_surfaces[target_name] ~= target.index) then return error_reply('lab-surface-not-owned') end
+  local released = Runtime.lab_release()
+  if not released.ok then return released end
+  local s = saved_state()
+  local sequence = (s.lab_sequence or 0) + 1
+  -- Never reuse a process-local counter after save/load, or delete an unrelated
+  -- surface merely because its name collides with the next generated name.
+  while game.get_surface('scv-gate-actions-' .. sequence) do sequence = sequence + 1 end
+  s.lab_sequence = sequence
+  local response = prepare(s, id, sequence)
+  response.cleanup = released.cleanup
+  if s.prepared and s.prepared.surface.valid then
+    s.lab_owned_surface_index = s.prepared.surface.index
+    s.lab_owned_surfaces = s.lab_owned_surfaces or {}
+    if target_name then s.lab_owned_surfaces[target_name] = s.prepared.surface.index end
+  end
+  return response
+end
+
+function Runtime.lab_actor()
+  if not lab_enabled() then return nil end
+  local s = saved_state()
+  local actor = s and s.prepared and s.prepared.actor
+  return actor and actor.valid and actor or nil
+end
+
+function Runtime.lab_suspend()
+  if not lab_enabled() then return error_reply('unified-lab-required') end
+  local s = saved_state()
+  if not s or not s.prepared then return error_reply('source-required') end
+  Adapters.stop(s.prepared)
+  s.phase = 'manual'
+  return status()
+end
+
+function Runtime.lab_result()
+  if not lab_enabled() then return nil end
+  local s = saved_state()
+  return s and s.result or nil
 end
 
 local function run(state)

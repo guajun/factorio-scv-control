@@ -1,8 +1,53 @@
-# Project progress — 2026-09-15
+# Project progress — 2026-09-16
 
 Target: SC2-like command responsiveness and reliable native-character movement
 in a changing Factorio world. This is not a reproduction of SC2's closed-source
 implementation. Issue counts are bookkeeping, not a percentage of functionality.
+
+## Single-save manual lab checkpoint
+
+`codex/unified-test-lab`, based on comparison commit `3917ab8`, adds a packaged
+single-player save with 56 selectable shared scenes: 11 static, 10 gate,
+5 dynamic and 30 belt. Fixed runs and production free right-click are separate
+modes. The static menu includes production planning and three explicitly
+recorded reference configurations from a fully verified 44-row comparison;
+no Python service is needed during manual play. Scene reset restores original
+static facts, cancels old planning and releases owned actors/surfaces. The
+production profile and immutable 56 source ZIPs are unchanged.
+
+The first complete lab replay passes all 89 fixed runs (44 static plus 45
+domain), selection of all 56 scenes and native actor lifecycle assertions:
+`F:\factorio-scv-testbench\unified\v1-20260916-105553\test-results.json`,
+artifact `scv-unified-lab-wvjyq4_y`. Focused engine integration passes 147
+assertions and new host conformance passes 20. Subsequent host checks also
+correlate each requested case/algorithm with both the outer terminal and inner
+native report, preventing stale or mislabeled successes from filling the matrix.
+The [lab guide](unified-test-lab.md) describes the manual launcher and controls.
+
+Final required `-Suite all -KeepArtifacts` passes. Delivery package:
+`F:\factorio-scv-testbench\unified\v1-20260916-111550`; manually run its
+`open-lab.cmd` to open `SCV-Unified-Test-Lab.zip` with its isolated mods.
+The final lab report has 91 successful checks: all-scenes selection,
+89 correlated native fixed runs, and a lifecycle group with 29 assertions.
+Its archive SHA-256 remains
+`be6b768d27cb4a8c3f9b14e3dbc826ad7e86b7c9850b8efa042b1b9382bd0428`.
+All-suite artifact: `factorio-scv-agent-test-824933f45475405aa2dafc026f911869`;
+lab artifact: `scv-unified-lab-dbydt905`. Full validation also includes 147
+integration assertions, the unchanged 11 × 10 benchmark and domain suites,
+45 original domain saves, 44 original static comparisons, seven realtime and
+sixteen stepped checks. Standard Python discovers 115 tests (114 pass, one
+optional dependency skip); all ten comparison-worker tests pass separately
+in pinned Python, including that dependency test. No graphical process was
+started. The new static comparison report is
+`F:\factorio-scv-testbench\comparisons\v1-20260916-110628-1c107a\comparison.json`.
+
+No GUI was launched. Because a fresh headless Factorio 2.0.77 save has no real
+LuaPlayer and no public create-player API, GUI layout, connected right-click
+input and player-controller acceptance remain explicitly unverified; native
+actor lifecycle success is not reported as GUI success. The original saved-map
+and solver suites remain alongside `unified` in the default headless `all`.
+
+## Prior review stack
 
 Review boundary: [PR #18](https://github.com/guajun/factorio-scv-control/pull/18)
 contains the external framework;
